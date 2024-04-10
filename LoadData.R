@@ -25,10 +25,6 @@ medcodeDiabetesT2 <- read.csv('Data/Medcodes/medcode_type2diabetes.csv')
 medcodeMyoInf <- read.csv('Data/Medcodes/medcode_mi.csv')
 medcodeStroke <- read.csv('Data/Medcodes/medcode_stroke.csv')
 
-
-
-
-
 # Load ICD codelists
 icdCodeStroke <- read.csv('Data/ICD/icd10_stroke.csv')
 icdCodeMyoInf <- read.csv('Data/ICD/icd10_mi.csv')
@@ -51,3 +47,4 @@ medcodeLDL <- read.csv('Data/Medcodes/medcode_ldl.csv')
 medcodeSBP <- read.csv('Data/Medcodes/medcode_sbp.csv')
 medcodeSmokingStatus <- read.csv('Data/Medcodes/medcode_smokingstatus.csv')
 medcodeTotalChol <- read.csv('Data/Medcodes/medcode_totalclstrl.csv')
+medcodeTriglycerides <- read.csv('Data/Medcodes/medcode_triglycerides.csv')
