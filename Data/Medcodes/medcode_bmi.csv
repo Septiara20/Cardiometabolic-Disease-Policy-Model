@@ -1,0 +1,41 @@
+medcodeid,term,bmi
+2310101000000115,obesity multidisciplinary case review,1
+2326491000000114,intensive weight management programme declined,1
+2350241000000116,obese class i (body mass index 30.0 - 34.9),1
+2350261000000115,obese class ii (body mass index 35.0 - 39.9),1
+100716012,body mass index,1
+264758010,treatment of obesity started,1
+264768017,reason for obesity therapy - occupational,1
+264769013,obesity monitoring nos,1
+1753321000006116,"intervention for risk to health associated with overweight and obesity, advice about diet and physical activity",1
+1753331000006118,"intervention for risk to health associated with overweight and obesity, advice about diet and physical activity, consider drugs,",1
+1753341000006111,"intervention for risk to health associated with overweight and obesity, advice about diet and physical activity, consider drugs, consider surgery",1
+453856012,body mass index less than 20,1
+253844013,body mass index normal k/m2,1
+2326311000000114 ,intensive weight management programme commenced,1
+264756014,has seen dietician - obesity,1
+1808071000006119,body mass index 18.5-24.9,1
+253848011,body mass index 30+ - obesity,1
+401534016,obesity monitoring,1
+264753018,follow-up obesity assessment,1
+264757017,treatment of obesity changed,1
+253845014,body mass index high k/m2,1
+253846010,body mass index low k/m2,1
+2326451000000118,intensive weight management programme ended,1
+2423851000000119,telehealth obesity monitoring,1
+264759019,treatment of obesity stopped,1
+264760012,attends slimming clinic,1
+2474325012,body mass index 20-24 - normal,1
+753291000006113,"risk to health associated with overweight and obesity, at high risk",1
+2196071000000116,baseline body mass index,1
+1808061000006114,body mass index less than 18.5,1
+1900331000006113,obese class iii (bmi equal to or greater than 40.0),1
+2160062010,body mass index 40+ - severely obese,1
+1551651000000111,body mass index centile,1
+253847018,body mass index index 25-29 - overweight,1
+923861000006112,body mass index,1
+264752011,initial obesity assessment,1
+1753271000006112,"risk to health associated with overweight and obesity, at no increased risk",
+1753281000006110,"risk to health associated with overweight and obesity, at increased risk",
+1753301000006114,"risk to health associated with overweight and obesity, at very high risk",1
+1753311000006112,"intervention for risk to health associated with overweight and obesity, general advice on healthy weight and lifestyle",1
