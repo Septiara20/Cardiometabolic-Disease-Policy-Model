@@ -14,6 +14,23 @@ sampledDeath <- read.csv('Data/sampled-aurum-death.csv')
 sampledPrimaryDiag <- read.csv('Data/sampled-primary-diag-hosp.csv')
 sampledDiagEpi <- read.csv('Data/sampled-diag-epi.csv')
 sampledDiagHosp <- read.csv('Data/sampled-diag-hosp.csv')
+sampledEpiHes <- read.csv('Data/sampled-epi-hes.csv')
+
+setDT(sampledDeath)
+setDT(sampledIMD2010)
+setDT(sampledDiagEpi)
+setDT(sampledPrimaryDiag)
+setDT(sampledEpiHes)
+setDT(sampledIMD2020)
+setDT(sampledPatient)
+
+setkey(sampledDeath, patid)
+setkey(sampledIMD2010, patid)
+setkey(sampledDiagEpi, patid)
+setkey(sampledPrimaryDiag, patid)
+setkey(sampledEpiHes, patid)
+setkey(sampledIMD2020, patid)
+setkey(sampledPatient, patid)
 
 message("Loading observation dataset...")
 # Load observation data in Parquet format
@@ -22,7 +39,7 @@ observationDataset <- open_dataset('Data/Observation/')
 message("Loading medcodes...")
 # Load diagnosis medcodes
 medcodeDiabetesT2 <- read.csv('Data/Medcodes/medcode_type2diabetes.csv')
-medcodeMyoInf <- read.csv('Data/Medcodes/medcode_mi.csv')
+medcodeMyoInf <- read.csv('Data/Medcodes/medcode_myocardialinfarction.csv')
 medcodeStroke <- read.csv('Data/Medcodes/medcode_stroke.csv')
 
 # Load ICD codelists
@@ -45,6 +62,6 @@ medcodeHyperlipidaemia <- read.csv('Data/Medcodes/medcode_hyperlipidaemia.csv')
 
 medcodeLDL <- read.csv('Data/Medcodes/medcode_ldl.csv')
 medcodeSBP <- read.csv('Data/Medcodes/medcode_sbp.csv')
-medcodeSmokingStatus <- read.csv('Data/Medcodes/medcode_smokingstatus.csv')
-medcodeTotalChol <- read.csv('Data/Medcodes/medcode_totalclstrl.csv')
+medcodeSmokingStatus <- read.csv('Data/Medcodes/medcode_smoking.csv')
+medcodeTotalChol <- read.csv('Data/Medcodes/medcode_totalcholesterol.csv')
 medcodeTriglycerides <- read.csv('Data/Medcodes/medcode_triglycerides.csv')
