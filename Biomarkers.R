@@ -671,9 +671,8 @@ getBaselineTable <- function(biomarkersCMD, biomarkersNonCMD) {
 }
 
 getBaselineTable_Optimized <- function(biomarkersCMD, biomarkersNonCMD) {
-  # Combine both CMD and NonCMD datasets for initial processing
-  allBiomarkers <- rbindlist(list(biomarkersCMD, biomarkersNonCMD), use.names = TRUE)
-  setkey(allBiomarkers, patid, obsdate)  # Set a key for faster sorting and merging
+  setkey(biomarkersCMD, patid, obsdate)  # Set a key for faster sorting and merging
+  setkey(biomarkersNonCMD, patid, obsdate)  # Set a key for faster sorting and merging
 
   # Define observation types with corresponding medcode IDs
   observationTypes <- list(
@@ -698,19 +697,27 @@ getBaselineTable_Optimized <- function(biomarkersCMD, biomarkersNonCMD) {
   alcoholObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeAlcoholStatus$medcodeid, "alcohol")
   smokingObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeSmokingStatus$medcodeid, "smoking")
   atrialFibObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeAtrialFib$medcodeid, "atrial fib")
-
+  hyperlipidaemiaObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeHyperlipidaemia$medcodeid, "hyperlipidaemia")
+  hypertensionObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeHypertension$medcodeid, "hypertension")
+  
+  
+  medcodeAlcohol <- as.integer64(medcodeAlcoholStatus$medcodeid)
+  medcodeAtrialFib <- as.integer64(medcodeAtrialFib$medcodeid)
+  medcodeSmoking <- as.integer64(medcodeSmokingStatus$medcodeid)
+  medcodeHypertension <- as.integer64(medcodeHypertension$medcodeid)
+  medcodeHyperlipidaemia <- as.integer64(medcodeHyperlipidaemia$medcodeid)
   # Append additional data to processed data list
-  processedData <- c(processedData, list(alcoholObservations, smokingObservations, atrialFibObservations))
+  #processedData <- c(processedData, list(alcoholObservations, smokingObservations, atrialFibObservations))
 
   # Combine all processed data
   combinedObservations <- rbindlist(processedData, use.names = TRUE, fill = TRUE)
   setkey(combinedObservations, patid, obsdate)
-
+  message("All data have been prepared. Please wait, this may take a while...")
   # Compute required results for each patient
   results <- combinedObservations[, .(
     age = as.numeric(format(min(obsdate), "%Y")) - sampledPatient[sampledPatient$patid == .BY$patid, yob],
     gender = sampledPatient[sampledPatient$patid == .BY$patid, gender],
-    ethnicity = sampledEpiHes[sampledEpiHes$patid == .BY$patid, .SD[order(-obsdate)][1, ethnos]],
+    ethnicity = sampledEpiHes[sampledEpiHes$patid == .BY$patid, .SD[order(-admidate)][1, ethnos]],
     bmi = mean(value[type == "bmi"], na.rm = TRUE),
     cholesterol = mean(value[type == "totalcholesterol"], na.rm = TRUE),
     dbp = mean(value[type == "dbp"], na.rm = TRUE),
@@ -719,11 +726,12 @@ getBaselineTable_Optimized <- function(biomarkersCMD, biomarkersNonCMD) {
     hba1c = mean(value[type == "hba1c"], na.rm = TRUE),
     hdl = mean(value[type == "hdl"], na.rm = TRUE),
     ldl = mean(value[type == "ldl"], na.rm = TRUE),
-    latestAlcoholUse = alcoholObservations[alcoholObservations$patid == .BY$patid, .SD[order(-obsdate)][1, value]],
-    latestSmokingStatus = smokingObservations[smokingObservations$patid == .BY$patid, .SD[order(-obsdate)][1, value]],
-    atrialFib = any(value[type == "atrial fib"]),
-    hyperlipidaemia = any(value[type == "hyperlipidaemia"]),
-    hypertension = any(value[type == "hypertension"])
+    latestAlcoholUse = medcodeAlcoholStatus[medcodeid == alcoholObservations[patid == .BY$patid, .SD[order(-obsdate)]][1, medcodeid], category],
+    latestSmokingStatus = medcodeSmokingStatus[medcodeid == smokingObservations[patid == .BY$patid, .SD[order(-obsdate)]][1, medcodeid], category],
+    atrialFib = length(atrialFibObservations[patid == .BY$patid, patid]) > 0,
+    hyperlipidaemia = length(hyperlipidaemiaObservations[patid == .BY$patid, patid]) > 0,
+    hypertension = length(hypertensionObservations[patid == .BY$patid, patid]) > 0, 
+    imd = sampledIMD2010[patid == .BY$patid, imd2010_5]
   ), by = .(patid)]
 
   # Ensure all results are combined into a single data.table
