@@ -1,6 +1,6 @@
 ###############################################################################
-# This R script loads patient data for those patients registered on the AURUM 
-# system between 2000 and 2020. Medcodes are also loaded into R dataframes.
+# This R script loads patient data for those patients who have HES-completed data.
+# Medcodes are also loaded into R dataframes.
 # The relevant CSV files must be provided.
 
 # Note: CSV files are reproducible by using the sampled patient ID index.
@@ -83,6 +83,26 @@ setDT(medcodeSBP)
 setDT(medcodeSmokingStatus)
 setDT(medcodeTotalChol)
 setDT(medcodeTriglycerides)
+# Setting medcodeid as integer64 for each medcode dataset
+medcodeDiabetesT2 <- medcodeDiabetesT2[, medcodeid := as.integer64(medcodeid)]
+medcodeMyoInf <- medcodeMyoInf[, medcodeid := as.integer64(medcodeid)]
+medcodeStroke <- medcodeStroke[, medcodeid := as.integer64(medcodeid)]
+medcodeAtrialFib <- medcodeAtrialFib[, medcodeid := as.integer64(medcodeid)]
+medcodeAlcoholStatus <- medcodeAlcoholStatus[, medcodeid := as.integer64(medcodeid)]
+medcodeBMI <- medcodeBMI[, medcodeid := as.integer64(medcodeid)]
+medcodeDBP <- medcodeDBP[, medcodeid := as.integer64(medcodeid)]
+medcodeFastingGlucose <- medcodeFastingGlucose[, medcodeid := as.integer64(medcodeid)]
+medcodeHBA1C <- medcodeHBA1C[, medcodeid := as.integer64(medcodeid)]
+medcodeHDL <- medcodeHDL[, medcodeid := as.integer64(medcodeid)]
+medcodeHypertension <- medcodeHypertension[, medcodeid := as.integer64(medcodeid)]
+medcodeHyperlipidaemia <- medcodeHyperlipidaemia[, medcodeid := as.integer64(medcodeid)]
+medcodeLDL <- medcodeLDL[, medcodeid := as.integer64(medcodeid)]
+medcodeSBP <- medcodeSBP[, medcodeid := as.integer64(medcodeid)]
+medcodeSmokingStatus <- medcodeSmokingStatus[, medcodeid := as.integer64(medcodeid)]
+medcodeTotalChol <- medcodeTotalChol[, medcodeid := as.integer64(medcodeid)]
+medcodeTriglycerides <- medcodeTriglycerides[, medcodeid := as.integer64(medcodeid)]
+
+# Ensure keys are set correctly for fast operations
 setkey(medcodeDiabetesT2, medcodeid)
 setkey(medcodeMyoInf, medcodeid)
 setkey(medcodeStroke, medcodeid)
@@ -100,6 +120,3 @@ setkey(medcodeSBP, medcodeid)
 setkey(medcodeSmokingStatus, medcodeid)
 setkey(medcodeTotalChol, medcodeid)
 setkey(medcodeTriglycerides, medcodeid)
-
-medcodeAlcoholStatus <- medcodeAlcoholStatus[, medcodeid := as.integer64(medcodeid)]
-medcodeSmokingStatus <- medcodeSmokingStatus[, medcodeid := as.integer64(medcodeid)]
