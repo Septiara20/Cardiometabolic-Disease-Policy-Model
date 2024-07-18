@@ -1,5 +1,5 @@
 ###############################################################################
-# This R script loads patient data for those patients who have HES-completed data.
+# This R script loads patient data for those patients with HES-complete data.
 # Medcodes are also loaded into R dataframes.
 # The relevant CSV files must be provided.
 
