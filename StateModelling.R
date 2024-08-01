@@ -125,3 +125,4 @@ getDiabToCVDPats <- function(survivalTable, firstCMDDates) {
   return(output)
 }
 
+
