@@ -21,15 +21,15 @@ setDT(sampledIMD2010)
 setDT(sampledDiagEpi)
 setDT(sampledPrimaryDiag)
 setDT(sampledEpiHes)
-setDT(sampledIMD2020)
 setDT(sampledPatient)
+setorder(sampledPatient, patid)
+setDT(sampledDiagHosp)
 
 setkey(sampledDeath, patid)
 setkey(sampledIMD2010, patid)
 setkey(sampledDiagEpi, patid)
 setkey(sampledPrimaryDiag, patid)
 setkey(sampledEpiHes, patid)
-setkey(sampledIMD2020, patid)
 setkey(sampledPatient, patid)
 
 message("Loading observation dataset...")
@@ -66,6 +66,10 @@ medcodeSmokingStatus <- read.csv('Data/Medcodes/medcode_smoking.csv')
 medcodeTotalChol <- read.csv('Data/Medcodes/medcode_totalcholesterol.csv')
 medcodeTriglycerides <- read.csv('Data/Medcodes/medcode_triglycerides.csv')
 
+medcodeCVD_FH <- read.csv('Data/Medcodes/medcode_fh_cvd.csv')
+medcodeDiab_FH <- read.csv('Data/Medcodes/medcode_fh_diabetes.csv')
+setDT(medcodeCVD_FH)
+setDT(medcodeDiab_FH)
 setDT(medcodeDiabetesT2)
 setDT(medcodeMyoInf)
 setDT(medcodeStroke)
@@ -102,6 +106,8 @@ medcodeSmokingStatus <- medcodeSmokingStatus[, medcodeid := as.integer64(medcode
 medcodeTotalChol <- medcodeTotalChol[, medcodeid := as.integer64(medcodeid)]
 medcodeTriglycerides <- medcodeTriglycerides[, medcodeid := as.integer64(medcodeid)]
 
+medcodeDiab_FH <- medcodeDiab_FH[, medcodeid := as.integer64(medcodeid)]
+medcodeCVD_FH <- medcodeCVD_FH[, medcodeid := as.integer64(medcodeid)]
 # Ensure keys are set correctly for fast operations
 setkey(medcodeDiabetesT2, medcodeid)
 setkey(medcodeMyoInf, medcodeid)

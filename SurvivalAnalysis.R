@@ -23,7 +23,9 @@ library(forcats)
 library(mstate)
 library(colorspace)
 #install_github("Exeter-Diabetes/EHRBiomarkr")
-library(EHRBiomarkr)
+library(EHRBiomarkr) 
+library(cmprsk)
+
 observationDataset <- open_dataset('Data/Observation/')
 
 ################################################################################
@@ -76,7 +78,8 @@ generateStateTransitionTable <- function(sampledPatient) {
     patid = integer(),
     date = as.Date(character()),
     type = character(),
-    epikey = integer()
+    spno = integer(),
+    source = character()  # Add a source column
   )
   
   message("Getting the qualifying patients...")
@@ -123,31 +126,36 @@ generateStateTransitionTable <- function(sampledPatient) {
     default = NA_character_
   )]
   
-  message("Tranforming observation and hospital tables so that the columns match...")
+  message("Transforming observation and hospital tables so that the columns match...")
   # Ensure date columns are of Date type and type columns are character
   observations[, date := as.Date(obsdate)]
   hospitalDiagnoses[, date := as.Date(epistart)]
   observations[, type := as.character(type)]
   hospitalDiagnoses[, type := as.character(type)]
   
-  # Add a placeholder for the 'epikey' column in observations
-  observations[, epikey := NA_integer_]
+  # Add a placeholder for the 'spno' column in observations
+  observations[, spno := NA_integer_]
+  
+  # Add a source column
+  observations[, source := "GP"]
+  hospitalDiagnoses[, source := "Hospital"]
   
   # Select and rename columns to align
-  observations <- observations[, .(patid, date, type, epikey)]
-  hospitalDiagnoses <- hospitalDiagnoses[, .(patid, date, type, epikey)]
+  observations <- observations[, .(patid, date, type, spno, source)]
+  hospitalDiagnoses <- hospitalDiagnoses[, .(patid, date, type, spno, source)]
   
   message("Combining observations and hospital diagnoses...")
   # Merge observations and hospital diagnoses
   allEvents <- rbindlist(list(observations, hospitalDiagnoses), use.names = TRUE, fill = TRUE)
   
   message("Adding death events...")
-  # Add death events
+  # Add death events with spno and source
   sampledPatient[, date := as.Date(cprd_ddate)]
   sampledPatient[, type := "death"]
-  sampledPatient[, epikey := NA_integer_] # death events don't have an epikey
+  sampledPatient[, spno := NA_integer_] # death events don't have an spno
+  sampledPatient[, source := "Registry"]
   
-  deathEvents <- sampledPatient[!is.na(date), .(patid, date, type, epikey)]
+  deathEvents <- sampledPatient[!is.na(date), .(patid, date, type, spno, source)]
   
   message("Combining all events...")
   # Combine all events
@@ -169,51 +177,114 @@ generateStateTransitionTable <- function(sampledPatient) {
   return(allEvents)
 }
 
-filterFirstDiabetes <- function(stateTransitionTable) {
-  # Filter rows with date on or before 2020-10-14
-  message("Removing any events after 2020-10-14...")
-  filteredTable <- stateTransitionTable[date <= as.Date("2020-10-14")]
-  # Extract first diabetes diagnosis per patient
-  firstDiabetes <-
-    filteredTable[type == "diabetes", .SD[1], by = patid]
-  # Extract all other diagnosis types
-  otherDiagnoses <- filteredTable[type != "diabetes"]
-  # Combine the filtered diabetes diagnoses with the other diagnoses
-  finalFilteredTable <- rbind(firstDiabetes, otherDiagnoses)
-  # Optional: to keep the rows sorted
-  setorder(finalFilteredTable, patid, date)
-  message("Rebuilding daysSinceLastEvent column...")
-  finalFilteredTable[, daysSinceLastEvent := c(0, diff(day)), by = patid]
-  return(finalFilteredTable)
+removeEventsWithinContCare <- function(eventsTable, sampledDiagHosp) {
+  # Convert 'discharged' to Date type if it's not already
+  sampledDiagHosp[, discharged := as.Date(discharged)]
+  
+  # Precompute a mapping of spno to discharge date
+  dischargeDateMap <- sampledDiagHosp[, .(discharged = max(discharged, na.rm = TRUE)), by = spno]
+  
+  # Add discharge dates to eventsTable using a join
+  filteredEvents <- merge(eventsTable, dischargeDateMap, by = "spno", all.x = TRUE, suffixes = c("", "_discharged"))
+
+  # Initialize a counter for tracking progress
+  totalPatients <- length(unique(filteredEvents$patid))
+  counter <- 0
+  
+  # Process each patid separately
+  processedEvents <- filteredEvents[, {
+    # Update progress counter and print progress
+    counter <<- counter + 1
+    if (counter %% 10000 == 0 || counter == totalPatients) {
+      cat(sprintf("Processing patid %d of %d (%.2f%% complete)\n", counter, totalPatients, (counter / totalPatients) * 100))
+    }
+    
+    # Logical vector to keep retained events
+    retain <- rep(TRUE, .N)
+    
+    # Separate processing for 'mi' and 'stroke' events
+    for (eventType in c("mi", "stroke")) {
+      # Initialize the latest discharge date as a very early date
+      latestDischargeDate <- as.Date("1990-01-01")
+      
+      # Track if the first event has been found
+      firstEventFound <- FALSE
+      
+      # Iterate through events for this patid
+      for (i in seq_len(.N)) {
+        row <- .SD[i]
+        
+        # Skip events not of the specified type (mi or stroke)
+        if (row$type != eventType) {
+          next
+        }
+        
+        # Process only the specified event type (mi or stroke)
+        if (row$type == eventType) {
+          # Retain the first occurrence
+          if (!firstEventFound) {
+            retain[i] <- TRUE
+            firstEventFound <- TRUE
+            # Only update latest discharge date if it's not NA
+            if (!is.na(row$discharged)) {
+              latestDischargeDate <- row$discharged
+            }
+          } else {
+            # For subsequent events, check the discharge date
+            if (!is.na(row$date) && !is.na(latestDischargeDate) && row$date <= latestDischargeDate) {
+              retain[i] <- FALSE  # Discard this event
+            } else {
+              # Retain this event and update latest discharge date
+              retain[i] <- TRUE
+              # Only update if discharged is not NA
+              if (!is.na(row$discharged)) {
+                latestDischargeDate <- row$discharged
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    # Return only events that are retained
+    .SD[retain]
+  }, by = patid]
+  setorder(processedEvents, patid, date)
+  # Rebuild daysSinceLastEvent
+  processedEvents[, daysSinceLastEvent := c(0, diff(day)), by = patid]
+  return(processedEvents)
 }
 
-relabelFirstSecondCVD <- function(stateTransitionTable) {
-  # Step 1: Retain the first and second entries for "stroke" and "mi"
-  retainFirstSecond <- function(dt, eventType) {
-    dt[type == eventType, eventCount := seq_len(.N), by = patid]
-    firstSecondEntries <- dt[type == eventType & eventCount <= 2]
-    firstSecondEntries[eventCount == 2, type := paste0("post-", eventType)]
-    firstSecondEntries[, eventCount := NULL]
-    return(firstSecondEntries)
-  }
+
+library(data.table)
+
+relabelFirstSecondCVD <- function(longStateTransitionTable) {
   
-  # Handle "stroke" and "mi" events separately
-  strokes <- retainFirstSecond(stateTransitionTable, "stroke")
-  mis <- retainFirstSecond(stateTransitionTable, "mi")
+  data <- copy(longStateTransitionTable)
+  # Sort the data by patid and date to ensure events are processed in order
+  setorder(data, patid, date)
   
-  # Extract other events
-  otherEvents <- stateTransitionTable[!type %in% c("stroke", "mi")]
+  # Create a copy of the original type column to preserve the original labels
+  data[, original_type := type]
   
-  # Combine the results
-  combinedEvents <- rbind(strokes, mis, otherEvents, fill = TRUE)
+  # Create a flag for the first and second occurrences of 'mi' and 'stroke'
+  data[, event_number := 1:.N, by = .(patid, type)]
   
-  # Sort the combined table
-  setorder(combinedEvents, patid, date)
+  # Relabel the second occurrence of 'mi' and 'stroke'
+  data[event_number == 2 & type == "mi", type := "post-mi"]
+  data[event_number == 2 & type == "stroke", type := "post-stroke"]
   
-  combinedEvents[, eventCount := NULL]
+  # Filter to keep only the first two occurrences of 'mi' and 'stroke'
+  filtered_data <- data[(event_number <= 2) | (type == "diabetes")]
   
-  return(combinedEvents)
+  # Remove the helper columns used for processing
+  filtered_data[, c("original_type", "event_number") := NULL]
+  
+  # Return the processed data
+  return(filtered_data)
 }
+
+
 
 removeCompetingCVDEvents <- function(stateTransitionTable) {
   # Add an index column to keep track of the original order
@@ -246,12 +317,35 @@ removeCompetingCVDEvents <- function(stateTransitionTable) {
   # Remove the index column
   stateTransitionTable[, index := NULL]
   
+    # Rebuild daysSinceLastEvent
+  stateTransitionTable[, daysSinceLastEvent := c(0, diff(day)), by = patid]
   return(stateTransitionTable)
 }
+
+filterFirstDiabetes <- function(stateTransitionTable) {
+  # Filter rows with date on or before 2020-10-14
+  message("Removing any events after 2020-10-14...")
+  filteredTable <- stateTransitionTable[date <= as.Date("2020-10-14")]
+  # Extract first diabetes diagnosis per patient
+  firstDiabetes <-
+    filteredTable[type == "diabetes", .SD[1], by = patid]
+  # Extract all other diagnosis types
+  otherDiagnoses <- filteredTable[type != "diabetes"]
+  # Combine the filtered diabetes diagnoses with the other diagnoses
+  finalFilteredTable <- rbind(firstDiabetes, otherDiagnoses)
+  # Optional: to keep the rows sorted
+  setorder(finalFilteredTable, patid, date)
+  message("Rebuilding daysSinceLastEvent column...")
+  finalFilteredTable[, daysSinceLastEvent := c(0, diff(day)), by = patid]
+  return(finalFilteredTable)
+}
+
 
 cleanAndFilter <- function(stateTransitionTable) {
   message("Removing follow-on diabetes events...")
   stateTransitionTable <- filterFirstDiabetes(stateTransitionTable)
+  message("Removing secondary events occurring within a period of continuous care...")
+  stateTransitionTable <- removeEventsWithinContCare(stateTransitionTable, sampledDiagHosp)
   message("Retaining first and second CVD events, and renaming the second post-{CVD}...")
   stateTransitionTable <- relabelFirstSecondCVD(stateTransitionTable)
   message("Removing competing CVD events...")
@@ -346,20 +440,22 @@ addBackPatientsWithNoEvents <- function(stateTransitionTable) {
   return(combinedTable)
 }
 # Function to add extra columns: age, gender, and deprivationIndex
-addExtraColumns <- function(dataTable, sampledPatient, sampledIMD2010) {
+addExtraColumns <- function (dataTable, sampledPatient, sampledIMD2010) {
+  message("Adding covariate columns...")
+  sampledPatientClone <- copy(sampledPatient)
   # Define the start date of the study
   startDate <- as.Date("1990-01-01")
   studyStartYear <- as.numeric(format(startDate, "%Y"))
   
   # Calculate age at the start of the study
-  sampledPatient[, age := studyStartYear - yob]
+  sampledPatientClone[, age := studyStartYear - yob]
   
   # Map gender codes to full names
   genderMapping <- c("F" = "Female", "M" = "Male", "I" = "Intersex")
-  sampledPatient[, gender := genderMapping[gender]]
+  sampledPatientClone[, gender := genderMapping[gender]]
   
   # Merge with sampledPatient to get age and gender
-  dataTable <- merge(dataTable, sampledPatient[, .(patid, age, gender)], by = "patid", all.x = TRUE)
+  dataTable <- merge(dataTable, sampledPatientClone[, .(patid, age, gender)], by = "patid", all.x = TRUE)
   
   # Merge with sampledIMD2010 to get deprivationIndex
   dataTable <- merge(dataTable, sampledIMD2010[, .(patid, imd2010_5)], by = "patid", all.x = TRUE)
@@ -370,15 +466,48 @@ addExtraColumns <- function(dataTable, sampledPatient, sampledIMD2010) {
   return(dataTable)
 }
 
+addFamilyHistoryCovariates <- function(wideTransitionTable) {
+  message("Adding family history covariate. May take a while...")
+  familyHistoryObservations <- observationDataset |> filter(medcodeid %in% medcodeCVD_FH$medcodeid | medcodeid %in% medcodeDiab_FH$medcodeid) |> collect()
+  setDT(familyHistoryObservations)
+  
+  cvdFamilyHistory <- familyHistoryObservations[medcodeid %in% medcodeCVD_FH$medcodeid]
+  diabFamilyHistory <- familyHistoryObservations[medcodeid %in% medcodeDiab_FH$medcodeid]
+  
+    # Create diabetesFH and cvdFH columns with default FALSE
+  wideTransitionTable$diabetesFH <- FALSE
+  wideTransitionTable$cvdFH <- FALSE
+  
+  # Set to TRUE if patid is found in family history datasets
+  wideTransitionTable$diabetesFH[wideTransitionTable$patid %in% diabFamilyHistory$patid] <- TRUE
+  wideTransitionTable$cvdFH[wideTransitionTable$patid %in% cvdFamilyHistory$patid] <- TRUE
+  return(wideTransitionTable)
+}
+
 # Gets all of the event data and turns it into wide format
-performDataPreparation <- function (sampledPatient) {
+performDataPreparation <- function (sampledPatient, sampledDiagHosp) {
   longStateTransitionTable <- generateStateTransitionTable(sampledPatient)
   longStateTransitionTable <- cleanAndFilter(longStateTransitionTable)
   longStateTransitionTable <- addBackPatientsWithNoEvents(longStateTransitionTable)
   wideTransitionTable <- convertToWideFormat(longStateTransitionTable)
   wideTransitionTable <- addExtraColumns(wideTransitionTable, sampledPatient, sampledIMD2010)
+  wideTransitionTable <- addFamilyHistoryCovariates(wideTransitionTable)
+  #wideTransitionTable <- convertAgeToCategory(wideTransitionTable) # Will be made time-dependent later
   return(wideTransitionTable)
 }
+
+convertAgeToCategory <- function(wideTransitionTable) {
+  wideTransitionTable$age<- cut(
+    wideTransitionTable$age,
+    breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
+    labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
+    right = TRUE  # Includes the upper bound in the interval
+  )
+  
+  # Return the modified data frame
+  return(wideTransitionTable)
+}
+
 
 createTransitionMatrix <- function() {
   tmat <-
@@ -401,25 +530,76 @@ prepareDataForModel <- function (transitionMatrix, wideTransitionTable) {
                          trans = transitionMatrix,
                          data = wideTransitionTable,
                          status = c(NA, "diabetes.s", "mi.s", "post-mi.s", "stroke.s", "post-stroke.s", "death.s"),
-                         keep = c("age", "gender", "deprivationIndex"))
+                         keep = c("age", "gender", "deprivationIndex", "diabetesFH", "cvdFH"),
+                         id = "patid")
+  preparedData <- addTimeDependentAge(preparedData)
   return(preparedData)
 }
 
+addTimeDependentAge <- function(msdata) {
+  # Calculate age at each Tstart (in years)
+  msdata$age_at_Tstart <- msdata$age + (msdata$Tstart / 365.25)
+
+  # Define the age categories based on the updated age
+  msdata$age <- cut(msdata$age_at_Tstart, 
+                                  breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
+                                  labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
+                                  right = FALSE)  # Adjust to include the lower bound correctly
+
+  # Check for any NAs and handle them
+  if (any(is.na(msdata$age_category_time))) {
+    cat("Warning: NAs found in age_category_time after cutting. Consider reviewing the age ranges or input data.\n")
+  }
+
+  # Clean up intermediate columns if not needed
+  msdata <- msdata[, !names(msdata) %in% c("age_at_Tstart")]
+
+  return(msdata)
+}
+
+
 # Can generalise for different covariates, but let's worry about that later
 includeCovariates <- function(preparedMStateData, transitionMatrix) {
-  covariates <- c("age", "gender", "deprivationIndex")
+  covariates <- c("age", "gender", "deprivationIndex", "diabetesFH", "cvdFH")
   
   preparedMStateData <- expand.covs(preparedMStateData, covariates, append = TRUE, longnames = TRUE)
   return(preparedMStateData)
 }
+
+################### FINE-GRAY ############################################
+
+getCumInc <- function(preparedMStateData) {
+  cif <- cuminc(ftime = preparedMStateData$time, fstatus = preparedMStateData$status)
+  return(cif)
+}
+
+##########################################################################
+
+# Below is Cox-related, prototype and initial testing only
 
 fitWeightedCox <- function(MStateData) {
   coxfit <- coxph(Surv(Tstart, Tstop, status) ~ strata(trans), data = MStateData, method = "breslow")
   return(coxfit)
 }
 
-convertDaysToYears <- function(MSStateData) {
-  MSStateData[, c("Tstart", "Tstop", "time")] <- MSStateData[, c("Tstart", "Tstop", "time")]/365.25
+fitWeightedCox_WithCovariates <- function(MStateDate) {
+                                        msprep(data = ebmt, trans = tmat, 
+                                        time = c(NA, "rec", "ae","recae", "rel", "srv"), 
+                                        status = c(NA, "rec.s", "ae.s", "recae.s","rel.s", "srv.s"), 
+                                        keep = c("match", "proph", "year", "agecl"))}
+
+
+convertDaysToYears <- function(MStateData) {
+  MStateData[c("Tstart", "Tstop", "time")] <- MStateData[c("Tstart", "Tstop", "time")] / 365.25
+  return(MStateData)
+}
+
+investigateDiabetesFHCovariate <- function(MStateData) {
+  # SAutomatically include all expanded diabetesFH covariates
+  covariates <- paste(paste0("diabetesFHTRUE.", 1:13), collapse = " + ")
+
+  cox_model <- coxph(Surv(Tstart, Tstop, status) ~ diabetesFHTRUE.1, data = MStateData)
+
 }
 
 plotTest <- function(fittedCox, transitionMatrix) {
@@ -432,22 +612,6 @@ plotTest <- function(fittedCox, transitionMatrix) {
   ord <- c(7, 6, 5, 4, 3, 2, 1)
   plot(probabilityTransform, ord = ord, xlab = "Years since study began", type = "filled", col = statecols[ord], legend.pos = "topleft", legend = c("", "", "", "", "", "", ""))
   legend("topleft", legend = state_labels, fill = statecols, cex = 0.8)
-}
-
-plotTest2 <- function(fittedCox, transitionMatrix) {
-  resultsOfFit <- msfit(object = fittedCox, vartype = "greenwood", trans = transitionMatrix)
-  probabilityTransform <- probtrans(resultsOfFit, predt = 0, method = "greenwood")
-  
-  state_labels <- c("Death", "Post-Stroke", "Stroke", "Post-MI", "MI", "Diabetes", "Healthy")
-  statecols <- c("black", "purple", "blue", "maroon", "orange", "yellow", "lightgray")
-  ord <- c(7, 6, 5, 4, 3, 2, 1)
-  
-  par(mfrow = c(4, 2))  # Create a 4x2 grid for individual plots
-  for (i in 1:length(ord)) {
-    plot(probabilityTransform$time, probabilityTransform$probs[, ord[i]], type = "l", col = statecols[ord[i]],
-         xlab = "Years since study began", ylab = "Probability", main = state_labels[ord[i]], lwd = 2)
-  }
-  par(mfrow = c(1, 1))  # Reset the plotting grid to default
 }
 
 getProbabilitiesAtTime <- function(fittedCox, transitionMatrix, years) {
