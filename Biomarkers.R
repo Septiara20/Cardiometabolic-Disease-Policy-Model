@@ -32,6 +32,317 @@ observationDataset <- open_dataset('Data/Observation/')
 # These are necessary precursors to baseline table generation
 ####################################################################
 
+###############################################################################
+# Biomarker code called from SurvivalAnalysis.R is in this section
+
+# Gets the date of the first CMD event for patients who have a CMD event
+getFirstCMDDates <- function(filteredPatients, sampledPatient) {
+  
+  # Combine medical codes into one vector for efficient filtering
+  combinedMedcodes <- unique(c(medcodeStroke$medcodeid, medcodeDiabetesT2$medcodeid, medcodeMyoInf$medcodeid))
+  
+  # Combine ICD codes into one vector for efficient filtering
+  combinedICDCodes <- unique(c(icdCodeStroke$icd, icdCodeMyoInf$icd, icdCodeT2Diab$icd))
+  
+  # Pre-filter relevant observations and diagnosis, adding a source column
+  relevantObservations <- observationDataset %>%
+    filter(patid %in% filteredPatients & medcodeid %in% medcodeDiabetesT2$medcodeid) %>%
+    select(patid, obsdate) %>%
+    mutate(obsdate = as.Date(obsdate, format = "%Y-%m-%d"), source = "GP") %>%
+    collect()
+
+  relevantHospEpi <- sampledDiagEpi[patid %in% filteredPatients & ICD %in% combinedICDCodes, .(patid, epistart = as.Date(epistart, format = "%Y-%m-%d"), source = "Hospital")]
+  
+  # Convert to data.table for fast operations
+  setDT(relevantObservations)
+  setDT(relevantHospEpi)
+  
+  # Rename columns for consistency
+  setnames(relevantHospEpi, "epistart", "date")
+  
+  # Set keys for fast joining and filtering
+  setkey(relevantObservations, patid)
+  setkey(relevantHospEpi, patid)
+  
+  # Combine the datasets
+  combinedEvents <- rbindlist(list(
+    relevantObservations[, .(patid, date = obsdate, source)],
+    relevantHospEpi[, .(patid, date, source)]
+  ), use.names = TRUE)
+
+  # Find the earliest event date for each patient, including the source
+  eventDates <- combinedEvents[, .SD[which.min(date)], by = patid]
+  
+  # Optional: Handle patients with all NA dates to ensure they are included with NA dates and source
+  allPatients <- unique(c(filteredPatients, relevantObservations$patid, relevantHospEpi$patid))
+  allPatientsData <- data.table(patid = allPatients)
+  setkey(allPatientsData, patid)
+  setkey(eventDates, patid)
+  
+  # Join to ensure all patients are included, even those with all NA dates and determine the source
+  finalEventDates <- allPatientsData[eventDates, on = "patid"]
+  
+  sampledPatientClone <- copy(sampledPatient)
+  # Define the start date of the study
+  startDate <- as.Date("1990-01-01")
+  studyStartYear <- as.numeric(format(startDate, "%Y"))
+  
+  # Calculate age at the start of the study
+  sampledPatientClone[, age := studyStartYear - yob]
+  
+  # Merge with sampledPatient to get age, patId pair
+  finalEventDates <- merge(finalEventDates, sampledPatientClone[, .(patid, age)], by = "patid", all.x = TRUE)
+  
+  finalEventDates <- convertAgeToCategory(finalEventDates)
+  
+  return(finalEventDates)
+}
+
+getBiomarkersWithin5Years <- function(firstCMDDates) {
+  # Define study start date
+  studyStartDate <- as.Date("1990-01-01")
+  
+  # Exclude AlcoholStatus from the biomarker list
+  combinedBiomarkerMedcodes <- unique(c(
+    medcodeAtrialFib$medcodeid, 
+    medcodeBMI$medcodeid, 
+    medcodeDBP$medcodeid, 
+    medcodeFastingGlucose$medcodeid, 
+    medcodeHBA1C$medcodeid, 
+    medcodeHDL$medcodeid, 
+    medcodeHyperlipidaemia$medcodeid, 
+    medcodeHypertension$medcodeid, 
+    medcodeLDL$medcodeid, 
+    medcodeSBP$medcodeid, 
+    medcodeSmokingStatus$medcodeid, 
+    medcodeTotalChol$medcodeid, 
+    medcodeTriglycerides$medcodeid
+  ))
+  
+  combinedBiomarkerMedcodes <- as.integer64(combinedBiomarkerMedcodes)
+  
+  # Filter observationDataset for relevant biomarkers and patients
+  relevantBioObservations <- observationDataset %>%
+    filter(patid %in% firstCMDDates$patid, 
+           medcodeid %in% combinedBiomarkerMedcodes) %>%
+    collect()
+
+  # Convert to data.table for faster manipulation
+  relevantBioObservations <- as.data.table(relevantBioObservations)
+  
+  # Convert firstCMDDates to data.table and merge to get first CMD date for each patient
+  firstCMDDates <- as.data.table(firstCMDDates)
+  relevantBioObservations <- merge(relevantBioObservations, firstCMDDates, by = "patid")
+  
+  # Calculate the 5-year window for each observation
+  relevantBioObservations[, fiveYearsBeforeCMD := pmax(date - years(5), studyStartDate)]
+  
+  # Filter to only include observations within the 5-year window before CMD and after study start date
+  relevantBioObservations <- relevantBioObservations[obsdate >= fiveYearsBeforeCMD & obsdate <= date]
+  
+  if ("source" %in% colnames(relevantBioObservations)) { relevantBioObservations[, source := NULL] }
+  # Return the filtered data.table
+  return(relevantBioObservations)
+}
+
+getAverageEventDateByAgeGroup <- function(filteredPatients, firstCMDDates, sampledPatient) {
+  nonCMDPatients <- data.table(setdiff(filteredPatients, firstCMDDates$patid))
+  setnames(nonCMDPatients, "patid")
+  sampledPatientClone <- copy(sampledPatient)
+  # Define the start date of the study
+  startDate <- as.Date("1990-01-01")
+  studyStartYear <- as.numeric(format(startDate, "%Y"))
+  
+  # Calculate age at the start of the study
+  sampledPatientClone[, age := studyStartYear - yob]
+  
+  # Merge with sampledPatient to get age, patId pair
+  patIdsWithAges <- merge(nonCMDPatients, sampledPatientClone[, .(patid, age)], by = "patid", all.x = TRUE)
+  patIdsWithAges <- convertAgeToCategory(patIdsWithAges)
+  
+  # Convert firstCMDDates$cmdDate to Date type if it's not already
+  firstCMDDates[, date := as.Date(date)]
+  
+  # Step 1: Group the first CMD dates by age group and calculate the average date
+  avgCMDDateByAgeGroup <- firstCMDDates[, .(avgCMDDate = mean(date, na.rm = TRUE)), by = age]
+  
+  # Step 2: Merge the average CMD date for each age group into the non-CMD patients
+  patIdsWithAges <- merge(patIdsWithAges, avgCMDDateByAgeGroup, by = "age", all.x = TRUE)
+  setorder(patIdsWithAges, patid)
+  setnames(patIdsWithAges, "avgCMDDate", "date")
+  # Now, patIdsWithAges has each non-CMD patient with their age group and the average CMD date for that age group
+  return(patIdsWithAges)
+}
+
+getNonCMDBiomarkersPseudoEvent <- function(filteredPatients, firstCMDDates, sampledPatient) {
+  patIdsWithExpectedDate <- getAverageEventDateByAgeGroup(filteredPatients, firstCMDDates, sampledPatient)
+  return (getBiomarkersWithin5Years(patIdsWithExpectedDate))
+}
+
+getBaselineTable <- function(biomarkersCMD, biomarkersNonCMD, filteredPatients) {
+  setkey(biomarkersCMD, patid, obsdate)  # Set a key for faster sorting and merging
+  setkey(biomarkersNonCMD, patid, obsdate)  # Set a key for faster sorting and merging
+
+  # Combine the unique patient IDs from both datasets
+  uniqueCMD <- unique(biomarkersCMD$patid)
+  uniqueNonCMD <- unique(biomarkersNonCMD$patid)
+  allUniquePatients <- unique(c(uniqueCMD, uniqueNonCMD))  # Union of both patient ID sets
+  message(glue("{length(allUniquePatients)} unique patients who have biomarkers"))
+  # Filter both data tables to include all these patients
+  #biomarkersCMD <- biomarkersCMD[patid %in% allUniquePatients]
+  #biomarkersNonCMD <- biomarkersNonCMD[patid %in% allUniquePatients]
+
+  # Define observation types with corresponding medcode IDs
+  observationTypes <- list(
+    bmi = medcodeBMI$medcodeid,
+    totalcholesterol = medcodeTotalChol$medcodeid,
+    dbp = medcodeDBP$medcodeid,
+    sbp = medcodeSBP$medcodeid,
+    fastingglucose = medcodeFastingGlucose$medcodeid,
+    hba1c = medcodeHBA1C$medcodeid,
+    hdl = medcodeHDL$medcodeid,
+    ldl = medcodeLDL$medcodeid,
+    triglyceride = medcodeTriglycerides$medcodeid,
+    alcohol = medcodeAlcoholStatus$medcodeid,
+    smoking = medcodeSmokingStatus$medcodeid,
+    atrialfib = medcodeAtrialFib$medcodeid,
+    hyperlipidaemia = medcodeHyperlipidaemia$medcodeid,
+    hypertension = medcodeHypertension$medcodeid
+  )
+  # Process each observation type through extractObservations
+  processedData <- lapply(names(observationTypes), function(type) {
+    if (type %in% c("alcohol", "smoking", "atrialfib", "hyperlipidaemia", "hypertension")) {
+      observations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, observationTypes[[type]], type)
+    } else {
+      observations <- extractObservations(biomarkersCMD, biomarkersNonCMD, observationTypes[[type]], type)
+    }
+    observations[, type := type]  # Add a column to keep track of the type
+    return(observations)
+  })
+
+  alcoholObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeAlcoholStatus$medcodeid, "alcohol")
+  smokingObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeSmokingStatus$medcodeid, "smoking")
+  atrialFibObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeAtrialFib$medcodeid, "atrial fib")
+  hyperlipidaemiaObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeHyperlipidaemia$medcodeid, "hyperlipidaemia")
+  hypertensionObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeHypertension$medcodeid, "hypertension")
+  medcodeAlcohol <- as.integer64(medcodeAlcoholStatus$medcodeid)
+  medcodeAtrialFib <- as.integer64(medcodeAtrialFib$medcodeid)
+  medcodeSmoking <- as.integer64(medcodeSmokingStatus$medcodeid)
+  medcodeHypertension <- as.integer64(medcodeHypertension$medcodeid)
+  medcodeHyperlipidaemia <- as.integer64(medcodeHyperlipidaemia$medcodeid)
+  
+  # Combine all processed data
+  combinedObservations <- rbindlist(processedData, use.names = TRUE, fill = TRUE)
+  setkey(combinedObservations, patid, obsdate)
+  # Debug: Check the number of patients after combining observations
+  message("Number of patients after combining observations: ", length(unique(combinedObservations$patid)))
+  # Create a base data.table with all patients to ensure no one is left out
+  allPatientData <- data.table(patid = allUniquePatients)
+  
+  # Full outer join to ensure all patient IDs are included
+  combinedObservations <- allPatientData[combinedObservations, on = "patid", nomatch = NA]
+  
+  message(glue("{length(unique(combinedObservations$patid))} patients represented in the observations"))
+
+  message("All data have been prepared. Please wait, this may take a while...")
+  # Compute required results for each patient
+  results <- combinedObservations[, .(
+    age = as.numeric(format(min(obsdate), "%Y")) - sampledPatient[sampledPatient$patid == .BY$patid, yob],
+    gender = sampledPatient[sampledPatient$patid == .BY$patid, gender],
+    ethnicity = sampledEpiHes[sampledEpiHes$patid == .BY$patid, .SD[order(-admidate)][1, ethnos]],
+    bmi = mean(value[type == "bmi"], na.rm = TRUE),
+    cholesterol = mean(value[type == "totalcholesterol"], na.rm = TRUE),
+    dbp = mean(value[type == "dbp"], na.rm = TRUE),
+    sbp = mean(value[type == "sbp"], na.rm = TRUE),
+    glucose = mean(value[type == "fastingglucose"], na.rm = TRUE),
+    hba1c = mean(value[type == "hba1c"], na.rm = TRUE),
+    hdl = mean(value[type == "hdl"], na.rm = TRUE),
+    ldl = mean(value[type == "ldl"], na.rm = TRUE),
+    triglycerides = mean(value[type == "triglyceride"], na.rm = TRUE),
+    latestAlcoholUse = medcodeAlcoholStatus[medcodeid == alcoholObservations[patid == .BY$patid, .SD[order(-obsdate)]][1, medcodeid], category],
+    latestSmokingStatus = medcodeSmokingStatus[medcodeid == smokingObservations[patid == .BY$patid, .SD[order(-obsdate)]][1, medcodeid], category],
+    atrialFib = length(atrialFibObservations[patid == .BY$patid, patid]) > 0,
+    hyperlipidaemia = length(hyperlipidaemiaObservations[patid == .BY$patid, patid]) > 0,
+    hypertension = length(hypertensionObservations[patid == .BY$patid, patid]) > 0, 
+    imd = sampledIMD2010[patid == .BY$patid, imd2010_5]
+  ), by = .(patid)]
+
+  # Ensure all results are combined into a single data.table
+  output <- as.data.table(results)
+  return(output)
+}
+
+categorizeColumn <- function(data, columnName, breaks, labels = NULL) {
+  # Ensure column exists in data
+  if (!columnName %in% names(data)) {
+    stop(glue("Column '{columnName}' not found in the data."))
+  }
+  
+  # Use cut to categorize the column based on the breaks and labels
+  data[[columnName]] <- cut(data[[columnName]], 
+                            breaks = breaks, 
+                            labels = labels, 
+                            include.lowest = TRUE, 
+                            right = FALSE)
+  
+  # Return the updated data
+  return(data)
+}
+
+performCategorization <- function(data) {
+  # BMI
+  bmiBreaks <- c(0, 18.5, 25, 30, Inf)
+  bmiLabels <- c("<18.5", "18.5-25", "25-30", ">30")
+  workingData <- categorizeColumn(data, "bmi", bmiBreaks, bmiLabels)
+  
+  # HDL
+  hdlBreaks <- c(0, 1.03, 1.55, Inf)
+  hdlLabels <- c("<1.03", "1.03-1.55", ">1.55")
+  workingData <- categorizeColumn(workingData, "hdl", hdlBreaks, hdlLabels)
+
+  # LDL
+  ldlBreaks <- c(0, 2.6, 3.4, 4, 4.9, Inf)
+  ldlLabels <- c("<2.6", "2.6-3.4", "3.4-4.0", "4.0-4.9", ">4.9")
+  workingData <- categorizeColumn(workingData, "ldl", ldlBreaks, ldlLabels)
+  
+  # Triglycerides
+  triglyBreaks <- c(0, 1.7, 2.3, 5.6, Inf)
+  triglyLabels <- c("<1.7", "1.7-2.3", "2.3-5.6", ">5.6")
+  workingData <- categorizeColumn(workingData, "triglycerides", triglyBreaks, triglyLabels)
+
+  # Total Cholesterol
+  totalCholBreaks <- c(0, 5, 5.5, 6, Inf)
+  totalCholLabels <- c("<5.0", "5.0-5.5", "5.5-6.0", ">6.0")
+  workingData <- categorizeColumn(workingData, "cholesterol", totalCholBreaks, totalCholLabels)
+
+  # Glucose
+  glucoseBreaks <- c(0, 5.5, 7, Inf)
+  glucoseLabels <- c("<5.5", "5.5-7.0", ">7.0")
+  workingData <- categorizeColumn(workingData, "glucose", glucoseBreaks, glucoseLabels)
+
+  # Systolic Blood Pressure (SBP)
+  sbpBreaks <- c(0, 120, 140, Inf)
+  sbpLabels <- c("<120", "120-140", ">140")
+  workingData <- categorizeColumn(workingData, "sbp", sbpBreaks, sbpLabels)
+
+  # Diastolic Blood Pressure (DBP)
+  dbpBreaks <- c(0, 80, 90, Inf)
+  dbpLabels <- c("<80", "80-90", ">90")
+  workingData <- categorizeColumn(workingData, "dbp", dbpBreaks, dbpLabels)
+
+  # HbA1c
+  hba1cBreaks <- c(0, 42, 48, Inf)
+  hba1cLabels <- c("<42", "42-48", ">48")
+  workingData <- categorizeColumn(workingData, "hba1c", hba1cBreaks, hba1cLabels)
+
+  return(workingData)
+}
+
+
+###############################################################################
+
+
+
 # Determines which patients have more than one year of history before their first
 # (First year after adult age confirmed)
 getCMDPatientsWith1yHistory <- function(fullCohort, firstCMDDates, cmdPatBiomarkers, sampledPatient) {
@@ -70,55 +381,6 @@ getCMDPatientsWith1yHistory <- function(fullCohort, firstCMDDates, cmdPatBiomark
 }
 
 
-# Gets the date of the first CMD event for patients who have a CMD event
-getFirstCMDDates <- function(filteredPatients) {
-  
-  # Combine medical codes into one vector for efficient filtering
-  combinedMedcodes <- unique(c(medcodeStroke$medcodeid, medcodeDiabetesT2$medcodeid, medcodeMyoInf$medcodeid))
-  
-  # Combine ICD codes into one vector for efficient filtering
-  combinedICDCodes <- unique(c(icdCodeStroke$icd, icdCodeMyoInf$icd, icdCodeT2Diab$icd))
-  
-  # Pre-filter relevant observations and diagnosis, adding a source column
-  relevantObservations <- observationDataset %>%
-    filter(patid %in% filteredPatients$patid & medcodeid %in% combinedMedcodes) %>%
-    select(patid, obsdate) %>%
-    mutate(obsdate = as.Date(obsdate, format = "%Y-%m-%d"), source = "GP") %>%
-    collect()
-
-  relevantHospEpi <- sampledDiagEpi[patid %in% filteredPatients$patid & ICD %in% combinedICDCodes, .(patid, epistart = as.Date(epistart, format = "%Y-%m-%d"), source = "Hospital")]
-  
-  # Convert to data.table for fast operations
-  setDT(relevantObservations)
-  setDT(relevantHospEpi)
-  
-  # Rename columns for consistency
-  setnames(relevantHospEpi, "epistart", "date")
-  
-  # Set keys for fast joining and filtering
-  setkey(relevantObservations, patid)
-  setkey(relevantHospEpi, patid)
-  
-  # Combine the datasets
-  combinedEvents <- rbindlist(list(
-    relevantObservations[, .(patid, date = obsdate, source)],
-    relevantHospEpi[, .(patid, date, source)]
-  ), use.names = TRUE)
-
-  # Find the earliest event date for each patient, including the source
-  eventDates <- combinedEvents[, .SD[which.min(date)], by = patid]
-  
-  # Optional: Handle patients with all NA dates to ensure they are included with NA dates and source
-  allPatients <- unique(c(filteredPatients$patid, relevantObservations$patid, relevantHospEpi$patid))
-  allPatientsData <- data.table(patid = allPatients)
-  setkey(allPatientsData, patid)
-  setkey(eventDates, patid)
-  
-  # Join to ensure all patients are included, even those with all NA dates and determine the source
-  finalEventDates <- allPatientsData[eventDates, on = "patid"]
-  
-  return(finalEventDates)
-}
 # Gets the first year of biomarker data for the non-CMD patients
 # (First year after adult age confirmed)
 getNonCMDBiomarkersWithinYear <- function(fullCohort, firstCMDDates) {
@@ -377,98 +639,7 @@ extractObservations <- function(cmdPatientBiomarkers, nonCmdPatientBiomarkers, m
   return(combinedObservations)
 }
 # This function produces the baseline biomarker table.
-getBaselineTable <- function(biomarkersCMD, biomarkersNonCMD) {
-  setkey(biomarkersCMD, patid, obsdate)  # Set a key for faster sorting and merging
-  setkey(biomarkersNonCMD, patid, obsdate)  # Set a key for faster sorting and merging
 
-  # Combine the unique patient IDs from both datasets
-  uniqueCMD <- unique(biomarkersCMD$patid)
-  uniqueNonCMD <- unique(biomarkersNonCMD$patid)
-  allUniquePatients <- unique(c(uniqueCMD, uniqueNonCMD))  # Union of both patient ID sets
-  message(glue("{length(allUniquePatients)} unique patients"))
-  # Filter both data tables to include all these patients
-  #biomarkersCMD <- biomarkersCMD[patid %in% allUniquePatients]
-  #biomarkersNonCMD <- biomarkersNonCMD[patid %in% allUniquePatients]
-
-  # Define observation types with corresponding medcode IDs
-  observationTypes <- list(
-    bmi = medcodeBMI$medcodeid,
-    totalcholesterol = medcodeTotalChol$medcodeid,
-    dbp = medcodeDBP$medcodeid,
-    sbp = medcodeSBP$medcodeid,
-    fastingglucose = medcodeFastingGlucose$medcodeid,
-    hba1c = medcodeHBA1C$medcodeid,
-    hdl = medcodeHDL$medcodeid,
-    ldl = medcodeLDL$medcodeid,
-    triglyceride = medcodeTriglycerides$medcodeid,
-    alcohol = medcodeAlcoholStatus$medcodeid,
-    smoking = medcodeSmokingStatus$medcodeid,
-    atrialfib = medcodeAtrialFib$medcodeid,
-    hyperlipidaemia = medcodeHyperlipidaemia$medcodeid,
-    hypertension = medcodeHypertension$medcodeid
-  )
-  # Process each observation type through extractObservations
-  processedData <- lapply(names(observationTypes), function(type) {
-    if (type %in% c("alcohol", "smoking", "atrialfib", "hyperlipidaemia", "hypertension")) {
-      observations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, observationTypes[[type]], type)
-    } else {
-      observations <- extractObservations(biomarkersCMD, biomarkersNonCMD, observationTypes[[type]], type)
-    }
-    observations[, type := type]  # Add a column to keep track of the type
-    return(observations)
-  })
-
-  alcoholObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeAlcoholStatus$medcodeid, "alcohol")
-  smokingObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeSmokingStatus$medcodeid, "smoking")
-  atrialFibObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeAtrialFib$medcodeid, "atrial fib")
-  hyperlipidaemiaObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeHyperlipidaemia$medcodeid, "hyperlipidaemia")
-  hypertensionObservations <- extractBooleanObservations(biomarkersCMD, biomarkersNonCMD, medcodeHypertension$medcodeid, "hypertension")
-  medcodeAlcohol <- as.integer64(medcodeAlcoholStatus$medcodeid)
-  medcodeAtrialFib <- as.integer64(medcodeAtrialFib$medcodeid)
-  medcodeSmoking <- as.integer64(medcodeSmokingStatus$medcodeid)
-  medcodeHypertension <- as.integer64(medcodeHypertension$medcodeid)
-  medcodeHyperlipidaemia <- as.integer64(medcodeHyperlipidaemia$medcodeid)
-  
-  # Combine all processed data
-  combinedObservations <- rbindlist(processedData, use.names = TRUE, fill = TRUE)
-  setkey(combinedObservations, patid, obsdate)
-  # Debug: Check the number of patients after combining observations
-  message("Number of patients after combining observations: ", length(unique(combinedObservations$patid)))
-  # Create a base data.table with all patients to ensure no one is left out
-  allPatientData <- data.table(patid = allUniquePatients)
-  
-  # Full outer join to ensure all patient IDs are included
-  combinedObservations <- allPatientData[combinedObservations, on = "patid", nomatch = NA]
-  
-  message(glue("{length(unique(combinedObservations$patid))} patients represented in the observations"))
-
-  message("All data have been prepared. Please wait, this may take a while...")
-  # Compute required results for each patient
-  results <- combinedObservations[, .(
-    age = as.numeric(format(min(obsdate), "%Y")) - sampledPatient[sampledPatient$patid == .BY$patid, yob],
-    gender = sampledPatient[sampledPatient$patid == .BY$patid, gender],
-    ethnicity = sampledEpiHes[sampledEpiHes$patid == .BY$patid, .SD[order(-admidate)][1, ethnos]],
-    bmi = mean(value[type == "bmi"], na.rm = TRUE),
-    cholesterol = mean(value[type == "totalcholesterol"], na.rm = TRUE),
-    dbp = mean(value[type == "dbp"], na.rm = TRUE),
-    sbp = mean(value[type == "sbp"], na.rm = TRUE),
-    glucose = mean(value[type == "fastingglucose"], na.rm = TRUE),
-    hba1c = mean(value[type == "hba1c"], na.rm = TRUE),
-    hdl = mean(value[type == "hdl"], na.rm = TRUE),
-    ldl = mean(value[type == "ldl"], na.rm = TRUE),
-    triglycerides = mean(value[type == "triglyceride"], na.rm = TRUE),
-    latestAlcoholUse = medcodeAlcoholStatus[medcodeid == alcoholObservations[patid == .BY$patid, .SD[order(-obsdate)]][1, medcodeid], category],
-    latestSmokingStatus = medcodeSmokingStatus[medcodeid == smokingObservations[patid == .BY$patid, .SD[order(-obsdate)]][1, medcodeid], category],
-    atrialFib = length(atrialFibObservations[patid == .BY$patid, patid]) > 0,
-    hyperlipidaemia = length(hyperlipidaemiaObservations[patid == .BY$patid, patid]) > 0,
-    hypertension = length(hypertensionObservations[patid == .BY$patid, patid]) > 0, 
-    imd = sampledIMD2010[patid == .BY$patid, imd2010_5]
-  ), by = .(patid)]
-
-  # Ensure all results are combined into a single data.table
-  output <- as.data.table(results)
-  return(output)
-}
 # This function produces additional data complementing the baseline table, without augmenting the original table.
 getSurvivalTable <- function(biomarkersCMD, biomarkersNonCMD) {
   allBiomarkers <- rbind(biomarkersCMD, biomarkersNonCMD)
@@ -728,12 +899,6 @@ showMultiDiseaseStats <- function(survivalTable) {
   message(glue("Number of patients without any measured CMD disease: {nrow(survivalTable[stroke == FALSE & mi == FALSE & diabetes == FALSE])}"))
 }
 
-library(lubridate)
-
-library(lubridate)
-
-library(lubridate)
-
 getSurvivalTable <- function(baselineTable, biomarkersCMD, biomarkersNonCMD, firstCMDDates) {
   patientIds <- baselineTable$patid
   message("Preparing data...")
@@ -803,7 +968,7 @@ getSurvivalTable <- function(baselineTable, biomarkersCMD, biomarkersNonCMD, fir
   return(survivalTable)
 }
 
-write.csv(survivalTable, file="survivalTable.csv")
+#write.csv(survivalTable, file="survivalTable.csv")
 # There are negative values for timeToFirstCMDEvent. Why?
 
 

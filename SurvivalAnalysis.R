@@ -29,6 +29,10 @@ library(cmprsk)
 observationDataset <- open_dataset('Data/Observation/')
 
 ################################################################################
+# Load other code here
+source("Biomarkers.R")
+################################################################################
+
 getQualifyingPatients <- function() {
   # We find patients who have a CMD diagnosis or event pre-1990 
   # and return the patients who qualify for the study
@@ -255,9 +259,6 @@ removeEventsWithinContCare <- function(eventsTable, sampledDiagHosp) {
   return(processedEvents)
 }
 
-
-library(data.table)
-
 relabelFirstSecondCVD <- function(longStateTransitionTable) {
   
   data <- copy(longStateTransitionTable)
@@ -466,6 +467,64 @@ addExtraColumns <- function (dataTable, sampledPatient, sampledIMD2010) {
   return(dataTable)
 }
 
+getBaselineBiomarkers <- function (sampledPatient) {
+  filteredPatients <- getQualifyingPatients()
+  firstCMDDates <- getFirstCMDDates(filteredPatients, sampledPatient)
+  biomarkersCMD <- getBiomarkersWithin5Years(firstCMDDates)
+  biomarkersNonCMD <- getNonCMDBiomarkersPseudoEvent(filteredPatients, firstCMDDates, sampledPatient)
+  baselineTable <- getBaselineTable(biomarkersCMD, biomarkersNonCMD, filteredPatients)
+  baselineTable <- performCategorization(baselineTable)
+}
+
+mergeDataFromBaseline <- function(wideTransitionTable, baselineTable) {
+  # Merge all the categorized columns from baselineTable into wideTransitionTable
+  mergedData <- merge(wideTransitionTable, 
+                      baselineTable[, .(patid, bmi, hdl, ldl, triglycerides, cholesterol, glucose, sbp, dbp, hba1c, 
+                                        latestSmokingStatus, atrialFib, hyperlipidaemia, hypertension)], 
+                      by = "patid", all.x = TRUE)
+
+  # Return the updated wideTransitionTable with the merged data
+  return(mergedData)
+}
+
+
+
+addAlcoholStatus <- function(wideTransitionTable) {
+  # Define the end date of the study (based on earlier conversations, assuming it's 2019-12-31)
+  studyEndDate <- as.Date("2019-12-31")
+  
+  # Extract patient IDs from wideTransitionTable
+  patIds <- wideTransitionTable[, patid]
+  
+  # Filter alcohol observations: valid medcodeid for alcohol status and within the study period
+  alcoholObservations <- observationDataset |> 
+    filter(medcodeid %in% medcodeAlcoholStatus$medcodeid & 
+           obsdate >= ymd('1990-01-01') & 
+           obsdate <= studyEndDate & 
+           patid %in% patIds) |> 
+    collect()
+  
+  # Merge alcoholObservations with medcodeAlcoholStatus to get the 'category'
+  alcoholObservations <- merge(alcoholObservations, medcodeAlcoholStatus, by = "medcodeid", all.x = TRUE)
+  
+  # Find the earliest alcohol observation category for each patient
+  earliestAlcoholStatus <- alcoholObservations %>%
+    group_by(patid) %>%
+    summarize(alcoholStatus = first(category[order(obsdate)]), .groups = 'drop')
+  
+  # Merge the earliest alcohol status (category) back into the wideTransitionTable
+  wideTransitionTable <- merge(wideTransitionTable, earliestAlcoholStatus, by = "patid", all.x = TRUE)
+  
+  return(wideTransitionTable)
+}
+
+addCMDPatBiomarkers <- function(wideTransitionTable) {
+  patIds <- wideTransitionTable$patid
+  message("Getting first CMD dates for each patient...")
+  firstCMDDates <- getFirstCMDDates(patIds)
+  message("Getting biomarkers with a 5-year lookbehind from the CMD date...")
+}
+
 addFamilyHistoryCovariates <- function(wideTransitionTable) {
   message("Adding family history covariate. May take a while...")
   familyHistoryObservations <- observationDataset |> filter(medcodeid %in% medcodeCVD_FH$medcodeid | medcodeid %in% medcodeDiab_FH$medcodeid) |> collect()
@@ -492,7 +551,6 @@ performDataPreparation <- function (sampledPatient, sampledDiagHosp) {
   wideTransitionTable <- convertToWideFormat(longStateTransitionTable)
   wideTransitionTable <- addExtraColumns(wideTransitionTable, sampledPatient, sampledIMD2010)
   wideTransitionTable <- addFamilyHistoryCovariates(wideTransitionTable)
-  #wideTransitionTable <- convertAgeToCategory(wideTransitionTable) # Will be made time-dependent later
   return(wideTransitionTable)
 }
 
@@ -507,7 +565,6 @@ convertAgeToCategory <- function(wideTransitionTable) {
   # Return the modified data frame
   return(wideTransitionTable)
 }
-
 
 createTransitionMatrix <- function() {
   tmat <-
@@ -530,25 +587,28 @@ prepareDataForModel <- function (transitionMatrix, wideTransitionTable) {
                          trans = transitionMatrix,
                          data = wideTransitionTable,
                          status = c(NA, "diabetes.s", "mi.s", "post-mi.s", "stroke.s", "post-stroke.s", "death.s"),
-                         keep = c("age", "gender", "deprivationIndex", "diabetesFH", "cvdFH"),
+                         keep = c("gender", "deprivationIndex", "diabetesFH", "cvdFH"),
                          id = "patid")
-  preparedData <- addTimeDependentAge(preparedData)
+  #preparedData <- addTimeDependentAge(preparedData, wideTransitionTable)
   return(preparedData)
 }
 
-addTimeDependentAge <- function(msdata) {
+addTimeDependentAge <- function(msdata, wideTransitionTable) {
+  # Merge the age from wideTransitionTable into msdata based on patid
+  msdata <- merge(msdata, wideTransitionTable[, .(patid, age)], by = "patid", all.x = TRUE)
+  
   # Calculate age at each Tstart (in years)
   msdata$age_at_Tstart <- msdata$age + (msdata$Tstart / 365.25)
 
   # Define the age categories based on the updated age
   msdata$age <- cut(msdata$age_at_Tstart, 
-                                  breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
-                                  labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
-                                  right = FALSE)  # Adjust to include the lower bound correctly
+                    breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
+                    labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
+                    right = FALSE)  # Adjust to include the lower bound correctly
 
   # Check for any NAs and handle them
-  if (any(is.na(msdata$age_category_time))) {
-    cat("Warning: NAs found in age_category_time after cutting. Consider reviewing the age ranges or input data.\n")
+  if (any(is.na(msdata$age))) {
+    cat("Warning: NAs found in age after cutting. Consider reviewing the age ranges or input data.\n")
   }
 
   # Clean up intermediate columns if not needed
@@ -557,18 +617,21 @@ addTimeDependentAge <- function(msdata) {
   return(msdata)
 }
 
-
 # Can generalise for different covariates, but let's worry about that later
-includeCovariates <- function(preparedMStateData, transitionMatrix) {
-  covariates <- c("age", "gender", "deprivationIndex", "diabetesFH", "cvdFH")
+includeCovariates <- function(preparedMStateData, wideTransitionTable) {
+  message("Expanding time-independent covariates gender, deprivationIndex, diabetesFH and cvdFH...")
+  covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH")
   
   preparedMStateData <- expand.covs(preparedMStateData, covariates, append = TRUE, longnames = TRUE)
+  
+  message("Adding time-dependent covariate age...")
+  preparedMStateData <- addTimeDependentAge(preparedMStateData, wideTransitionTable)
   return(preparedMStateData)
 }
 
 ################### FINE-GRAY ############################################
 
-getCumInc <- function(preparedMStateData) {
+getCumulInc <- function(preparedMStateData) {
   cif <- cuminc(ftime = preparedMStateData$time, fstatus = preparedMStateData$status)
   return(cif)
 }
@@ -582,16 +645,63 @@ fitWeightedCox <- function(MStateData) {
   return(coxfit)
 }
 
-fitWeightedCox_WithCovariates <- function(MStateDate) {
-                                        msprep(data = ebmt, trans = tmat, 
-                                        time = c(NA, "rec", "ae","recae", "rel", "srv"), 
-                                        status = c(NA, "rec.s", "ae.s", "recae.s","rel.s", "srv.s"), 
-                                        keep = c("match", "proph", "year", "agecl"))}
+compareAgesWithDFtoDiab <- function(msData) {
+  preparedMStateData <- copy(msData)
+  
+  # Ensure the age column is a factor with the correct levels
+  preparedMStateData$age <- factor(preparedMStateData$age, 
+                                   levels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"))
+  
+  # Set contrasts to sum-to-zero (this compares each level against the overall mean)
+  contrasts(preparedMStateData$age) <- contr.sum(levels(preparedMStateData$age))
+  
+  # Fit the Cox model without an intercept
+  cox_model <- coxph(Surv(Tstart, Tstop, status) ~ age + strata(trans) - 1,
+                     data = preparedMStateData,
+                     subset = (trans == 1))
+  
+  # Extract the coefficients and calculate the missing one
+  coef_values <- coef(cox_model)
+  sum_coef <- sum(coef_values)
+  coef_values <- c(coef_values, -sum_coef)
+  names(coef_values) <- levels(preparedMStateData$age)
+  
+  # Convert coefficients to hazard ratios (exp(coef))
+  hazard_ratios <- exp(coef_values)
+  
+  # Print the hazard ratios in a human-readable format
+  for (i in seq_along(hazard_ratios)) {
+    hr_value <- hazard_ratios[i]
+    age_group <- names(hazard_ratios)[i]
+    risk_change <- (hr_value - 1) * 100
+    
+    if (risk_change > 0) {
+      cat(sprintf("The hazard ratio for age group %s is %.4f, meaning this group has a %.2f%% higher risk than the average hazard.\n",
+                  age_group, hr_value, risk_change))
+    } else {
+      cat(sprintf("The hazard ratio for age group %s is %.4f, meaning this group has a %.2f%% lower risk than the average hazard.\n",
+                  age_group, hr_value, abs(risk_change)))
+    }
+  }
+  
+  return(cox_model)
+}
 
-
-convertDaysToYears <- function(MStateData) {
-  MStateData[c("Tstart", "Tstop", "time")] <- MStateData[c("Tstart", "Tstop", "time")] / 365.25
-  return(MStateData)
+compareAgeAgainstOverallMean <- function(msData) {
+  preparedMStateData <- copy(msData)
+  
+  preparedMStateData$age <- factor(preparedMStateData$age, 
+                                   levels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"))
+  message(levels(preparedMStateData$age))
+  # Set contrasts to sum-to-zero (this compares each level against the overall mean)
+  contrasts(preparedMStateData$age) <- contr.sum(levels(preparedMStateData$age))
+  
+  # Fit the Cox model without an intercept
+  cox_model <- coxph(Surv(Tstart, Tstop, status) ~ age + strata(trans) - 1,
+                     data = preparedMStateData,
+                     subset = (trans == 1))
+  
+  return(cox_model)
 }
 
 investigateDiabetesFHCovariate <- function(MStateData) {
