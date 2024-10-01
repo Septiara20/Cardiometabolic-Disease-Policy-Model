@@ -518,13 +518,6 @@ addAlcoholStatus <- function(wideTransitionTable) {
   return(wideTransitionTable)
 }
 
-addCMDPatBiomarkers <- function(wideTransitionTable) {
-  patIds <- wideTransitionTable$patid
-  message("Getting first CMD dates for each patient...")
-  firstCMDDates <- getFirstCMDDates(patIds)
-  message("Getting biomarkers with a 5-year lookbehind from the CMD date...")
-}
-
 addFamilyHistoryCovariates <- function(wideTransitionTable) {
   message("Adding family history covariate. May take a while...")
   familyHistoryObservations <- observationDataset |> filter(medcodeid %in% medcodeCVD_FH$medcodeid | medcodeid %in% medcodeDiab_FH$medcodeid) |> collect()
