@@ -484,6 +484,8 @@ mergeDataFromBaseline <- function(wideTransitionTable, baselineTable) {
                       by = "patid", all.x = TRUE)
 
   # Return the updated wideTransitionTable with the merged data
+  
+  # NOTE: This leaves the FH columns unpopulated for patients with no biomarkers!!
   return(mergedData)
 }
 
@@ -544,7 +546,12 @@ performDataPreparation <- function (sampledPatient, sampledDiagHosp) {
   wideTransitionTable <- convertToWideFormat(longStateTransitionTable)
   wideTransitionTable <- addExtraColumns(wideTransitionTable, sampledPatient, sampledIMD2010)
   wideTransitionTable <- addFamilyHistoryCovariates(wideTransitionTable)
+  wideTransitionTable <- removeIntersexPatients(wideTransitionTable)
   return(wideTransitionTable)
+}
+
+removeIntersexPatients <- function(wideTransitionTable) {
+  wideTransitionTable <- wideTransitionTable[gender != "Intersex"]
 }
 
 convertAgeToCategory <- function(wideTransitionTable) {
@@ -575,13 +582,13 @@ createTransitionMatrix <- function() {
     )
 }
 
-prepareDataForModel <- function (transitionMatrix, wideTransitionTable) {
-  preparedData <- msprep(time = c(NA, "diabetes", "mi", "post-mi", "stroke", "post-stroke", "death"), 
+prepareDataForModel <- function (transitionMatrix, wideTransitionTable, covariateList = NULL) {
+  preparedData <- suppressWarnings(msprep(time = c(NA, "diabetes", "mi", "post-mi", "stroke", "post-stroke", "death"), 
                          trans = transitionMatrix,
                          data = wideTransitionTable,
                          status = c(NA, "diabetes.s", "mi.s", "post-mi.s", "stroke.s", "post-stroke.s", "death.s"),
-                         keep = c("gender", "deprivationIndex", "diabetesFH", "cvdFH"),
-                         id = "patid")
+                         keep = covariateList,
+                         id = "patid"))
   #preparedData <- addTimeDependentAge(preparedData, wideTransitionTable)
   return(preparedData)
 }
@@ -610,146 +617,195 @@ addTimeDependentAge <- function(msdata, wideTransitionTable) {
   return(msdata)
 }
 
-# Can generalise for different covariates, but let's worry about that later
-includeCovariates <- function(preparedMStateData, wideTransitionTable) {
-  message("Expanding time-independent covariates gender, deprivationIndex, diabetesFH and cvdFH...")
-  covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH")
+# # Can generalise for different covariates, but let's worry about that later
+# includeCovariates <- function(preparedMStateData, wideTransitionTable) {
+#   message("Expanding time-independent covariates gender, deprivationIndex, diabetesFH and cvdFH...")
+#   covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH")
+#   
+#   preparedMStateData <- expand.covs(preparedMStateData, covariates, append = TRUE, longnames = TRUE)
+#   
+#   message("Adding time-dependent covariate age...")
+#   preparedMStateData <- addTimeDependentAge(preparedMStateData, wideTransitionTable)
+#   return(preparedMStateData)
+# }
+
+
+# Generalized version to include both time-independent and time-dependent covariates
+includeCovariates <- function(preparedMStateData, wideTransitionTable, covariates) {
+  # Separate time-dependent and time-independent covariates
+  timeDependentCovariates <- "age"  # Assuming 'age' is the only time-dependent one for now
+  timeIndependentCovariates <- setdiff(covariates, timeDependentCovariates)
+
+  allTimeIndependentCovs <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH", 
+                "bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
+                "glucose", "sbp", "dbp", "hba1c", "latestSmokingStatus", 
+                "atrialFib", "hyperlipidaemia", "hypertension")
   
-  preparedMStateData <- expand.covs(preparedMStateData, covariates, append = TRUE, longnames = TRUE)
+  # Expand time-independent covariates
+  if (length(timeIndependentCovariates) > 0) {
+    message(glue("Expanding time-independent covariates: {paste(timeIndependentCovariates, collapse = ', ')}..."))
+    preparedMStateData <- expand.covs(preparedMStateData, timeIndependentCovariates, append = TRUE, longnames = TRUE)
+  } else {
+    message("No time-independent covariates to expand.")
+  }
   
-  message("Adding time-dependent covariate age...")
-  preparedMStateData <- addTimeDependentAge(preparedMStateData, wideTransitionTable)
+  # Add time-dependent covariates (e.g., 'age')
+  if (timeDependentCovariates %in% covariates) {
+    message("Adding time-dependent covariate 'age'...")
+    preparedMStateData <- addTimeDependentAge(preparedMStateData, wideTransitionTable)
+  } else {
+    message("No time-dependent covariates to add.")
+  }
+  setDT(preparedMStateData)
+  preparedMStateData <- preparedMStateData[, setdiff(names(preparedMStateData), covariates), with = FALSE]
+  
   return(preparedMStateData)
 }
 
-################### FINE-GRAY ############################################
+covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH", 
+                "bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
+                "glucose", "sbp", "dbp", "hba1c", "latestSmokingStatus", 
+                "atrialFib", "hyperlipidaemia", "hypertension")
 
-getCumulInc <- function(preparedMStateData) {
-  cif <- cuminc(ftime = preparedMStateData$time, fstatus = preparedMStateData$status)
-  return(cif)
+
+# Function to prepare and run Cox models with flexible covariates and transitions
+runCoxModel <- function(wideTransitionTable, transitionMatrix, covariates = NULL, selectedTransitions = NULL) {
+  
+  wideTransitionTable <- replaceSpecialCharacters(wideTransitionTable)
+  wideTransitionTable <- convertNAsToFalse(wideTransitionTable)
+  
+  # Remove people with Intersex gender. Should be moved to cleaning function above
+  wideTransitionTable <- wideTransitionTable[gender != "Intersex"]
+  
+  
+  wideTransitionTable <- addFactors(wideTransitionTable)
+  # Step 1: Prepare data in long format using prepareDataForModel
+  preparedData <- prepareDataForModel(transitionMatrix, wideTransitionTable, covariateList = covariates)
+  
+  # Step 2: Expand covariates and add time-dependent age
+  message("Expanding covariates and adding time-dependent covariates...")
+  preparedData <- includeCovariates(preparedData, wideTransitionTable, covariates)
+  
+  # Step 3: Filter out NAs for complete-case analysis
+  message("Performing complete-case analysis. Removing rows with missing values...")
+  filteredData <- na.omit(preparedData)  # Filters out rows with missing covariates
+  
+  # Output some logging info
+  message(glue("Number of patients in analysis: {length(unique(filteredData$patid))}"))
+  setDT(filteredData)
+  # Step 4: Check for selected transitions and filter if necessary
+  if (!is.null(selectedTransitions)) {
+    message(glue("Fitting model for transitions: {paste(selectedTransitions, collapse = ', ')}"))
+    filteredData <- filteredData[trans %in% selectedTransitions]
+  } else {
+    selectedTransitions <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10','11','12','13')
+    message("Fitting model for all transitions.")
+  }
+  
+  gc() 
+  rm(preparedData)
+  gc()
+  filteredData <- as.data.frame(filteredData)
+  
+  
+    # Get the expanded covariate names (excluding the unexpanded ones)
+  # Only keep covariates for the selected transitions
+  expandedCovariates <- colnames(filteredData)[grepl(paste0("\\.(", paste(selectedTransitions, collapse = "|"), ")$"), colnames(filteredData))]
+  
+  # Get the expanded covariate names (excluding the unexpanded ones)
+  expandedCovariates2 <- colnames(filteredData)[grepl("\\.", colnames(filteredData))]
+
+  # Construct the formula dynamically
+  formula <- as.formula(paste("Surv(Tstart, Tstop, status) ~", paste(expandedCovariates, collapse = " + ")))
+  
+  coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
+
+  # Step 5: Fit Cox model with the expanded covariates
+  #coxModel <- coxph(Surv(Tstart, Tstop, status) ~ ., data = filteredData, x = TRUE, method = "breslow")
+  
+  return(coxModel)
 }
 
-##########################################################################
-
-# Below is Cox-related, prototype and initial testing only
-
-fitWeightedCox <- function(MStateData) {
-  coxfit <- coxph(Surv(Tstart, Tstop, status) ~ strata(trans), data = MStateData, method = "breslow")
-  return(coxfit)
+addFactors <- function(wideTransitionTable) 
+{
+  wideTransitionTable$gender <- factor(wideTransitionTable$gender, levels = c("Male", "Female"))
+  wideTransitionTable$deprivationIndex <- factor(wideTransitionTable$deprivationIndex, levels = c(1, 2, 3, 4, 5))
+  wideTransitionTable$latestSmokingStatus <- factor(wideTransitionTable$latestSmokingStatus, levels = c('Non smoker', 
+                                                                                                        'Active smoker', 
+                                                                                                        'Ex smoker'))
+  wideTransitionTable$alcoholStatus <- factor(wideTransitionTable$alcoholStatus, levels = c('AlcoholConsumptionLevel0', 
+                                                                                            'AlcoholConsumptionLevel1', 
+                                                                                            'AlcoholConsumptionLevel2', 
+                                                                                            'AlcoholConsumptionLevel3'))
+  wideTransitionTable$bmi <- factor(wideTransitionTable$bmi, levels = c('less.than.18.5', '18.5.to.25', '25.to.30', 'greater.than.30'))
+  
+  wideTransitionTable$bmi <- relevel(wideTransitionTable$bmi, ref = '18.5.to.25')
+  wideTransitionTable$latestSmokingStatus <- relevel(wideTransitionTable$latestSmokingStatus, ref = 'Non smoker')
+  
+  return(wideTransitionTable)
 }
 
-compareAgesWithDFtoDiab <- function(msData) {
-  preparedMStateData <- copy(msData)
+replaceSpecialCharacters <- function(wideTransitionTable) {
   
-  # Ensure the age column is a factor with the correct levels
-  preparedMStateData$age <- factor(preparedMStateData$age, 
-                                   levels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"))
+  wideTransitionTable$latestSmokingStatus <- gsub("-", " ", wideTransitionTable$latestSmokingStatus)
+  # Loop over all columns
+  for (col in names(wideTransitionTable)) {
+    # Check if the column is of type character or factor
+    if (is.character(wideTransitionTable[[col]]) || is.factor(wideTransitionTable[[col]])) {
+      # Replace '<' with 'lt' and '>' with 'gt'
+      wideTransitionTable[[col]] <- gsub("<", "less.than.", wideTransitionTable[[col]])
+      wideTransitionTable[[col]] <- gsub(">", "greater.than.", wideTransitionTable[[col]])
+      wideTransitionTable[[col]] <- gsub("-", ".to.", wideTransitionTable[[col]])
+    }
+  }
+  return(wideTransitionTable)
+}
+
+############################################################## Cox Analysis
+
+# Use the mapping in your function to print the transition names
+analyseLifestyleFactors <- function() {
+  coxModelResults <- runCoxModel(wideTransitionTable, transitionMatrix, c('latestSmokingStatus', 'alcoholStatus', 'bmi'), c(1, 2, 4))
   
-  # Set contrasts to sum-to-zero (this compares each level against the overall mean)
-  contrasts(preparedMStateData$age) <- contr.sum(levels(preparedMStateData$age))
+  # Loop through each transition and print the results with meaningful names
+  for (transition in c(1, 2, 4)) {
+    cat("Transition:", transitionNames[[as.character(transition)]], "\n")
+    print(coxModelResults[[transition]])
+    cat("\n")
+  }
+}
+
+
+################################################################################
+############################################################@@@@@@@ Utilities
+
+convertNAsToFalse <- function(data) {
+  cols_to_convert <- c("hypertension", "hyperlipidaemia", "atrialFib")
   
-  # Fit the Cox model without an intercept
-  cox_model <- coxph(Surv(Tstart, Tstop, status) ~ age + strata(trans) - 1,
-                     data = preparedMStateData,
-                     subset = (trans == 1))
-  
-  # Extract the coefficients and calculate the missing one
-  coef_values <- coef(cox_model)
-  sum_coef <- sum(coef_values)
-  coef_values <- c(coef_values, -sum_coef)
-  names(coef_values) <- levels(preparedMStateData$age)
-  
-  # Convert coefficients to hazard ratios (exp(coef))
-  hazard_ratios <- exp(coef_values)
-  
-  # Print the hazard ratios in a human-readable format
-  for (i in seq_along(hazard_ratios)) {
-    hr_value <- hazard_ratios[i]
-    age_group <- names(hazard_ratios)[i]
-    risk_change <- (hr_value - 1) * 100
-    
-    if (risk_change > 0) {
-      cat(sprintf("The hazard ratio for age group %s is %.4f, meaning this group has a %.2f%% higher risk than the average hazard.\n",
-                  age_group, hr_value, risk_change))
-    } else {
-      cat(sprintf("The hazard ratio for age group %s is %.4f, meaning this group has a %.2f%% lower risk than the average hazard.\n",
-                  age_group, hr_value, abs(risk_change)))
+  for (col in cols_to_convert) {
+    if (col %in% colnames(data)) {
+      data[[col]][is.na(data[[col]])] <- FALSE
     }
   }
   
-  return(cox_model)
+  return(data)
 }
 
-compareAgeAgainstOverallMean <- function(msData) {
-  preparedMStateData <- copy(msData)
-  
-  preparedMStateData$age <- factor(preparedMStateData$age, 
-                                   levels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"))
-  message(levels(preparedMStateData$age))
-  # Set contrasts to sum-to-zero (this compares each level against the overall mean)
-  contrasts(preparedMStateData$age) <- contr.sum(levels(preparedMStateData$age))
-  
-  # Fit the Cox model without an intercept
-  cox_model <- coxph(Surv(Tstart, Tstop, status) ~ age + strata(trans) - 1,
-                     data = preparedMStateData,
-                     subset = (trans == 1))
-  
-  return(cox_model)
-}
-
-investigateDiabetesFHCovariate <- function(MStateData) {
-  # SAutomatically include all expanded diabetesFH covariates
-  covariates <- paste(paste0("diabetesFHTRUE.", 1:13), collapse = " + ")
-
-  cox_model <- coxph(Surv(Tstart, Tstop, status) ~ diabetesFHTRUE.1, data = MStateData)
-
-}
-
-plotTest <- function(fittedCox, transitionMatrix) {
-  resultsOfFit <- msfit(object = fittedCox, vartype = "greenwood", trans = transitionMatrix)
-  probabilityTransform <- probtrans(resultsOfFit, predt = 0, method = "greenwood")
-  #plot(resultsOfFit, las = 1, xlab = "Days since study began")
-  state_labels <- c("Death", "Post-Stroke", "Stroke", "Post-MI", "MI", "Diabetes", "Healthy")
-
-  statecols <- c("black", "purple", "blue", "maroon", "orange", "yellow", "lightgray")
-  ord <- c(7, 6, 5, 4, 3, 2, 1)
-  plot(probabilityTransform, ord = ord, xlab = "Years since study began", type = "filled", col = statecols[ord], legend.pos = "topleft", legend = c("", "", "", "", "", "", ""))
-  legend("topleft", legend = state_labels, fill = statecols, cex = 0.8)
-}
-
-getProbabilitiesAtTime <- function(fittedCox, transitionMatrix, years) {
-  library(mstate)
-  
-  # Fit the model
-  resultsOfFit <- msfit(object = fittedCox, vartype = "greenwood", trans = transitionMatrix)
-  probabilityTransform <- probtrans(resultsOfFit, predt = 0, method = "greenwood")
-  
-  # Convert years to days (assuming 365.25 days per year to account for leap years)
-  target_time <- years * 365.25
-  
-  # Find the closest time point in the probabilityTransform
-  closest_time_index <- which.min(abs(probabilityTransform[[1]]$time - target_time))
-  closest_time <- probabilityTransform[[1]]$time[closest_time_index]
-  
-  # Get probabilities at the closest time point for each state
-  state_probs <- sapply(probabilityTransform, function(x) x$prob[closest_time_index, ])
-  
-  # Debugging: Print the closest time point and probabilities
-  print(paste("Closest time (days):", closest_time))
-  print("Probabilities at closest time:")
-  print(state_probs)
-  
-  # Create a table with the state labels and probabilities
-  state_labels <- names(probabilityTransform)
-  
-  # Ensure probabilities vector matches the length of state_labels
-  if (length(state_probs) != length(state_labels)) {
-    stop("The number of probabilities does not match the number of states.")
-  }
-  
-  prob_table <- data.frame(State = state_labels, Probability = state_probs)
-  
-  return(prob_table)
-}
+# Define a list to map transitions to names
+transitionNames <- list(
+  '1' = "Disease-free to Diabetes",
+  '2' = "Disease-free to MI - 1 event",
+  '3' = "Disease-free to Stroke - 1 event",
+  '4' = "Disease-free to Death",
+  '5' = "Diabetes to MI - 1 event",
+  '6' = "Diabetes to Stroke - 1 event",
+  '7' = "Diabetes to Death",
+  '8' = "MI - 1 event to MI - >1 event",
+  '9' = "MI - 1 event to Death",
+  '10' = "MI - >1 event to Death",
+  '11' = "Stroke - 1 event to Stroke - >1 event",
+  '12' = "Stroke - 1 event to Death",
+  '13' = "Stroke - >1 event to Death"
+)
 
 

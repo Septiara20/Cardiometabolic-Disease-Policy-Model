@@ -272,6 +272,31 @@ getBaselineTable <- function(biomarkersCMD, biomarkersNonCMD, filteredPatients) 
   return(output)
 }
 
+fillMissingPatients <- function(wideTransitionTable, baselineTable) {
+  # Create a copy of wideTransitionTable to avoid modifying the original
+  tempTable <- copy(wideTransitionTable)
+  
+  # Convert gender values from "Female" to "F" and "Male" to "M" in the copied table
+  tempTable[gender == "Female", gender := "F"]
+  tempTable[gender == "Male", gender := "M"]
+  
+  # Find the patient IDs in tempTable that are not in baselineTable
+  missing_patids <- setdiff(tempTable$patid, baselineTable$patid)
+  
+  # Filter tempTable to only include missing patients, then select patid and gender
+  missing_rows <- tempTable[patid %in% missing_patids, .(patid, gender)]
+  
+  # Get all the column names from baselineTable and set them to NA in the missing rows, except for patid and gender
+  for (col in setdiff(names(baselineTable), c("patid", "gender"))) {
+    missing_rows[, (col) := NA]
+  }
+  
+  # Bind the missing rows to the baselineTable
+  baselineTable <- rbind(baselineTable, missing_rows, fill = TRUE)
+  
+  return(baselineTable)
+}
+
 categorizeColumn <- function(data, columnName, breaks, labels = NULL) {
   # Ensure column exists in data
   if (!columnName %in% names(data)) {
@@ -336,6 +361,79 @@ performCategorization <- function(data) {
   workingData <- categorizeColumn(workingData, "hba1c", hba1cBreaks, hba1cLabels)
 
   return(workingData)
+}
+
+calculateStatisticsByGroup <- function(data, columnName, breaks, genderLevels = c("M", "F")) {
+  # Ensure gender is treated as a factor with levels in the desired order
+  data$gender <- factor(data$gender, levels = genderLevels)
+  
+  # Create a new grouping variable based on numerical groupings
+  data <- data %>%
+    mutate(group = cut(get(columnName), breaks = breaks, include.lowest = TRUE, right = FALSE))
+
+  # Calculate total population count for percentage calculation
+  total_population <- nrow(data)
+
+  # Calculate mean, standard deviation, and count for each group by gender
+  stats_table <- data %>%
+    group_by(group, gender) %>%
+    summarise(
+      count = n(), 
+      mean = sprintf("%.2f", mean(get(columnName), na.rm = TRUE)),  # Format mean to 2 decimal places as string
+      sd = sd(get(columnName), na.rm = TRUE),
+      .groups = 'drop'
+    ) %>%
+    mutate(percentage = sprintf("%.2f", (count / total_population * 100))) %>%  # Format percentage to 2 decimal places as string
+    select(group, gender, mean, sd, count, percentage)  # Specifying order of columns
+
+  return(stats_table)
+}
+
+getDescriptiveStatistics <- function(data) {
+  # BMI
+  bmiBreaks <- c(0, 18.5, 25, 30, Inf)
+  print("BMI data is below:")
+  print(calculateStatisticsByGroup(data, "bmi", bmiBreaks))
+  
+  # HDL
+  hdlBreaks <- c(0, 1.03, 1.55, Inf)
+  print("HDL data is below:")
+  print(calculateStatisticsByGroup(data, "hdl", hdlBreaks))
+  
+  # LDL
+  ldlBreaks <- c(0, 2.6, 3.4, 4, 4.9, Inf)
+  print("LDL data is below:")
+  print(calculateStatisticsByGroup(data, "ldl", ldlBreaks))
+  
+  # Triglycerides
+  triglyBreaks <- c(0, 1.7, 2.3, 5.6, Inf)
+  print("Triglycerides data is below:")
+  print(calculateStatisticsByGroup(data, "triglycerides", triglyBreaks))
+  
+  # Total Cholesterol
+  totalCholBreaks <- c(0, 5, 5.5, 6, Inf)
+  print("Total Cholesterol data is below:")
+  print(calculateStatisticsByGroup(data, "cholesterol", totalCholBreaks))
+  
+  # Glucose
+  glucoseBreaks <- c(0, 5.5, 7, Inf)
+  print("Glucose data is below:")
+  print(calculateStatisticsByGroup(data, "glucose", glucoseBreaks))
+  
+  # Systolic Blood Pressure (SBP)
+  sbpBreaks <- c(0, 120, 140, Inf)
+  print("Systolic Blood Pressure (SBP) data is below:")
+  print(calculateStatisticsByGroup(data, "sbp", sbpBreaks))
+  
+  # Diastolic Blood Pressure (DBP)
+  dbpBreaks <- c(0, 80, 90, Inf)
+  print("Diastolic Blood Pressure (DBP) data is below:")
+  print(calculateStatisticsByGroup(data, "dbp", dbpBreaks))
+  
+  # HbA1c
+  hba1cBreaks <- c(0, 42, 48, Inf)
+  print("HbA1c data is below:")
+  print(calculateStatisticsByGroup(data, "hba1c", hba1cBreaks))
 }
 
 
@@ -834,32 +932,6 @@ calculateAgeGenderDistribution <- function(baselineTable) {
   return(list(percentage_table = percentage_table, std_dev_table = std_dev_table))
 }
 
-calculateStatisticsByGroup <- function(data, columnName, breaks, genderLevels = c("M", "F", "I")) {
-  # Ensure gender is treated as a factor with levels in the desired order
-  data$gender <- factor(data$gender, levels = genderLevels)
-  
-  # Create a new grouping variable based on numerical groupings
-  data <- data %>%
-    mutate(group = cut(get(columnName), breaks = breaks, include.lowest = TRUE, right = FALSE))
-
-  # Calculate total population count for percentage calculation
-  total_population <- nrow(data)
-
-  # Calculate mean, standard deviation, and count for each group by gender
-  stats_table <- data %>%
-    group_by(group, gender) %>%
-    summarise(
-      count = n(), 
-      mean = sprintf("%.2f", mean(get(columnName), na.rm = TRUE)),  # Format mean to 2 decimal places as string
-      sd = sd(get(columnName), na.rm = TRUE),
-      .groups = 'drop'
-    ) %>%
-    mutate(percentage = sprintf("%.2f", (count / total_population * 100))) %>%  # Format percentage to 2 decimal places as string
-    select(group, gender, mean, sd, count, percentage)  # Specifying order of columns
-
-  return(stats_table)
-}
-
 calculateValueMatches <- function(data, columnName, matchValues, genderLevels = c("M", "F", "I")) {
   # Ensure gender is treated as a factor with levels in the desired order
   data$gender <- factor(data$gender, levels = genderLevels)
@@ -969,7 +1041,6 @@ getSurvivalTable <- function(baselineTable, biomarkersCMD, biomarkersNonCMD, fir
 }
 
 #write.csv(survivalTable, file="survivalTable.csv")
-# There are negative values for timeToFirstCMDEvent. Why?
 
 
 ###############################################################################
@@ -978,9 +1049,9 @@ getSurvivalTable <- function(baselineTable, biomarkersCMD, biomarkersNonCMD, fir
 # The core idea here is to instead take the average of the 5 years leading
 # up to each patient's CMD event
 
-# Patients who never have a CMD event will not be considered in the biomarker
-# set
-
+# Patients who never have a CMD event have a simulated CMD event at the
+# average of the CMD patient's first event, grouped by categorized age at start 
+# of study
 ###############################################################################
 # Retainable functions:
 # GetCMDBiomarkerObservations
