@@ -10,3 +10,4 @@ loadDependencies <- function() {
           "data.table")
   message("Dependencies loaded!")
 }
+

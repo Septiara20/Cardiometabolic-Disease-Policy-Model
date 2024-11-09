@@ -31,6 +31,7 @@ observationDataset <- open_dataset('Data/Observation/')
 ################################################################################
 # Load other code here
 source("Biomarkers.R")
+source("TimeDependencies.R")
 ################################################################################
 
 getQualifyingPatients <- function() {
@@ -285,7 +286,29 @@ relabelFirstSecondCVD <- function(longStateTransitionTable) {
   return(filtered_data)
 }
 
+addTimeDependentAge <- function(msdata, wideTransitionTable) {
+  # Merge the age from wideTransitionTable into msdata based on patid
+  #msdata <- merge(msdata, wideTransitionTable[, .(patid, age)], by = "patid", all.x = TRUE)
+  
+  # Calculate age at each Tstart (in years)
+  msdata$age_at_Tstart <- msdata$age + (msdata$Tstart / 365.25)
 
+  # Define the age categories based on the updated age
+  msdata$age <- cut(msdata$age_at_Tstart, 
+                    breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
+                    labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
+                    right = FALSE)  # Adjust to include the lower bound correctly
+
+  # Check for any NAs and handle them
+  if (any(is.na(msdata$age))) {
+    cat("Warning: NAs found in age after cutting. Consider reviewing the age ranges or input data.\n")
+  }
+
+  # Clean up intermediate columns if not needed
+  msdata <- msdata[, !names(msdata) %in% c("age_at_Tstart")]
+
+  return(msdata)
+}
 
 removeCompetingCVDEvents <- function(stateTransitionTable) {
   # Add an index column to keep track of the original order
@@ -489,6 +512,15 @@ mergeDataFromBaseline <- function(wideTransitionTable, baselineTable) {
   return(mergedData)
 }
 
+addEthnicity <- function(wideTransitionTable, sampledEpiHes) {
+  # For each patient (patid), get the most recent 'ethnos' value from 'sampledEpiHes'
+  ethnicityData <- sampledEpiHes[, .(ethnicity = .SD[order(-admidate)][1, ethnos]), by = patid]
+
+  # Merge the ethnicity data into wideTransitionTable using 'patid' as the key
+  wideTransitionTable <- merge(wideTransitionTable, ethnicityData, by = "patid", all.x = TRUE)
+  
+  return(wideTransitionTable)
+}
 
 
 addAlcoholStatus <- function(wideTransitionTable) {
@@ -593,30 +625,6 @@ prepareDataForModel <- function (transitionMatrix, wideTransitionTable, covariat
   return(preparedData)
 }
 
-addTimeDependentAge <- function(msdata, wideTransitionTable) {
-  # Merge the age from wideTransitionTable into msdata based on patid
-  msdata <- merge(msdata, wideTransitionTable[, .(patid, age)], by = "patid", all.x = TRUE)
-  
-  # Calculate age at each Tstart (in years)
-  msdata$age_at_Tstart <- msdata$age + (msdata$Tstart / 365.25)
-
-  # Define the age categories based on the updated age
-  msdata$age <- cut(msdata$age_at_Tstart, 
-                    breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
-                    labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
-                    right = FALSE)  # Adjust to include the lower bound correctly
-
-  # Check for any NAs and handle them
-  if (any(is.na(msdata$age))) {
-    cat("Warning: NAs found in age after cutting. Consider reviewing the age ranges or input data.\n")
-  }
-
-  # Clean up intermediate columns if not needed
-  msdata <- msdata[, !names(msdata) %in% c("age_at_Tstart")]
-
-  return(msdata)
-}
-
 # # Can generalise for different covariates, but let's worry about that later
 # includeCovariates <- function(preparedMStateData, wideTransitionTable) {
 #   message("Expanding time-independent covariates gender, deprivationIndex, diabetesFH and cvdFH...")
@@ -630,7 +638,6 @@ addTimeDependentAge <- function(msdata, wideTransitionTable) {
 # }
 
 
-# Generalized version to include both time-independent and time-dependent covariates
 includeCovariates <- function(preparedMStateData, wideTransitionTable, covariates) {
   # Separate time-dependent and time-independent covariates
   timeDependentCovariates <- "age"  # Assuming 'age' is the only time-dependent one for now
@@ -638,7 +645,7 @@ includeCovariates <- function(preparedMStateData, wideTransitionTable, covariate
 
   allTimeIndependentCovs <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH", 
                 "bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
-                "glucose", "sbp", "dbp", "hba1c", "latestSmokingStatus", 
+                "glucose", "sbp", "dbp", "hba1c", "latestSmokingStatus", "alcoholStatus",
                 "atrialFib", "hyperlipidaemia", "hypertension")
   
   # Expand time-independent covariates
@@ -646,7 +653,7 @@ includeCovariates <- function(preparedMStateData, wideTransitionTable, covariate
     message(glue("Expanding time-independent covariates: {paste(timeIndependentCovariates, collapse = ', ')}..."))
     preparedMStateData <- expand.covs(preparedMStateData, timeIndependentCovariates, append = TRUE, longnames = TRUE)
   } else {
-    message("No time-independent covariates to expand.")
+    # message("No time-independent covariates to expand.")
   }
   
   # Add time-dependent covariates (e.g., 'age')
@@ -654,51 +661,57 @@ includeCovariates <- function(preparedMStateData, wideTransitionTable, covariate
     message("Adding time-dependent covariate 'age'...")
     preparedMStateData <- addTimeDependentAge(preparedMStateData, wideTransitionTable)
   } else {
+    # Handle cases where there are no time-dependent covariates
     message("No time-dependent covariates to add.")
   }
+
+  # Step 3: Ensure that only expanded covariates are kept, and age if it exists in the covariate list
+  expandedCovariates <- setdiff(names(preparedMStateData), covariates)
+  
+  # If age is in the covariate list, retain it, otherwise exclude it as well
+  relevantCovariates <- if ("age" %in% covariates) {
+    c(expandedCovariates, "age")
+  } else {
+    expandedCovariates
+  }
+  
   setDT(preparedMStateData)
-  preparedMStateData <- preparedMStateData[, setdiff(names(preparedMStateData), covariates), with = FALSE]
+  preparedMStateData <- preparedMStateData[, relevantCovariates, with = FALSE]
   
   return(preparedMStateData)
 }
 
+
 covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH", 
-                "bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
-                "glucose", "sbp", "dbp", "hba1c", "latestSmokingStatus", 
+                "bmi", "hdl", "ldl", "triglycerides", "hba1c", "cholesterol", 
+                "glucose", "sbp", "dbp", "latestSmokingStatus", 
                 "atrialFib", "hyperlipidaemia", "hypertension")
 
 
-# Function to prepare and run Cox models with flexible covariates and transitions
 runCoxModel <- function(wideTransitionTable, transitionMatrix, covariates = NULL, selectedTransitions = NULL) {
   
   wideTransitionTable <- replaceSpecialCharacters(wideTransitionTable)
   wideTransitionTable <- convertNAsToFalse(wideTransitionTable)
-  
-  # Remove people with Intersex gender. Should be moved to cleaning function above
-  wideTransitionTable <- wideTransitionTable[gender != "Intersex"]
-  
   
   wideTransitionTable <- addFactors(wideTransitionTable)
   # Step 1: Prepare data in long format using prepareDataForModel
   preparedData <- prepareDataForModel(transitionMatrix, wideTransitionTable, covariateList = covariates)
   
   # Step 2: Expand covariates and add time-dependent age
-  message("Expanding covariates and adding time-dependent covariates...")
   preparedData <- includeCovariates(preparedData, wideTransitionTable, covariates)
   
   # Step 3: Filter out NAs for complete-case analysis
-  message("Performing complete-case analysis. Removing rows with missing values...")
   filteredData <- na.omit(preparedData)  # Filters out rows with missing covariates
   
-  # Output some logging info
-  message(glue("Number of patients in analysis: {length(unique(filteredData$patid))}"))
+  print(glue("Number of patients in analysis: pre {length(unique(filteredData$patid))}"))
   setDT(filteredData)
+  
   # Step 4: Check for selected transitions and filter if necessary
   if (!is.null(selectedTransitions)) {
     message(glue("Fitting model for transitions: {paste(selectedTransitions, collapse = ', ')}"))
     filteredData <- filteredData[trans %in% selectedTransitions]
   } else {
-    selectedTransitions <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10','11','12','13')
+    selectedTransitions <- c('1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13')
     message("Fitting model for all transitions.")
   }
   
@@ -707,23 +720,70 @@ runCoxModel <- function(wideTransitionTable, transitionMatrix, covariates = NULL
   gc()
   filteredData <- as.data.frame(filteredData)
   
-  
-    # Get the expanded covariate names (excluding the unexpanded ones)
-  # Only keep covariates for the selected transitions
+  # Step 5: Build the formula dynamically based on whether 'age' is in the covariate list
   expandedCovariates <- colnames(filteredData)[grepl(paste0("\\.(", paste(selectedTransitions, collapse = "|"), ")$"), colnames(filteredData))]
   
-  # Get the expanded covariate names (excluding the unexpanded ones)
-  expandedCovariates2 <- colnames(filteredData)[grepl("\\.", colnames(filteredData))]
-
-  # Construct the formula dynamically
-  formula <- as.formula(paste("Surv(Tstart, Tstop, status) ~", paste(expandedCovariates, collapse = " + ")))
+  # Add age to the model conditionally if it is in the covariate list
+  if ("age" %in% covariates) {
+    formula <- as.formula(paste("Surv(Tstart, Tstop, status) ~", paste(c("age", expandedCovariates), collapse = " + ")))
+  } else {
+    formula <- as.formula(paste("Surv(Tstart, Tstop, status) ~", paste(expandedCovariates, collapse = " + ")))
+  }
   
+  # Step 6: Fit Cox model with the expanded covariates
   coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
-
-  # Step 5: Fit Cox model with the expanded covariates
-  #coxModel <- coxph(Surv(Tstart, Tstop, status) ~ ., data = filteredData, x = TRUE, method = "breslow")
   
   return(coxModel)
+}
+
+runModelForAllTransitionsAndAge <- function(wideTransitionTable, transitionNames) {
+  doRunModelForTransitionsAndCov(wideTransitionTable, transitionMatrix, c("age"), transitionNames)
+}
+
+getSubsetWithAllCovs <- function(wideTransitionTable, covariates) {
+  wideTransitionTable <- replaceSpecialCharacters(wideTransitionTable)
+  wideTransitionTable <- convertNAsToFalse(wideTransitionTable)
+  
+  # Remove people with Intersex gender. Should be moved to cleaning function above
+  wideTransitionTable <- wideTransitionTable[gender != "Intersex"]
+  
+  wideTransitionTable <- addFactors(wideTransitionTable)
+  # Step 1: Prepare data in long format using prepareDataForModel
+  preparedData <- prepareDataForModel(transitionMatrix, wideTransitionTable, covariateList = covariates)
+  
+  # Step 2: Expand covariates and add time-dependent age
+  preparedData <- includeCovariates(preparedData, wideTransitionTable, covariates)
+  
+  # Step 3: Filter out NAs for complete-case analysis
+  filteredData <- na.omit(preparedData)  # Filters out rows with missing covariates
+  
+  returnTable <- wideTransitionTable[patid %in% unique(filteredData$patid) ]
+  return(returnTable)
+}
+
+# Runs the model for all covariates AT ONCE except hba1c
+runModelForAllAtSameTime <- function(wideTransitionTable, transitionNames) {
+  covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH", 
+                "bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
+                "glucose", "sbp", "dbp", "latestSmokingStatus", 
+                "atrialFib", "hyperlipidaemia", "hypertension", "age", "ethnicity")
+  
+    doRunModelForTransitionsAndCov(wideTransitionTable, transitionMatrix, covariates, transitionNames)
+}
+
+runModelForAllTransitionsAndCovs <- function(wideTransitionTable, transitionNames) {
+  covariates <- c("hdl", "ldl", "sbp", "dbp","bmi", "triglycerides", "cholesterol", "glucose", "hba1c", "gender", "deprivationIndex", "diabetesFH", "cvdFH", "latestSmokingStatus", "atrialFib", "hyperlipidaemia", "hypertension", "alcoholStatus")
+  
+  for (covariate in covariates) {
+    doRunModelForTransitionsAndCov(wideTransitionTable, transitionMatrix, covariate, transitionNames)
+  }
+}
+
+doRunModelForTransitionsAndCov <- function(wideTransitionTable, transitionMatrix, covariate, transitionNames) {
+  for (i in seq_along(transitionNames)) {
+    print(runCoxModel(wideTransitionTable, transitionMatrix, covariate, c(i)))
+    cat("\n")
+  }
 }
 
 addFactors <- function(wideTransitionTable) 
@@ -740,6 +800,10 @@ addFactors <- function(wideTransitionTable)
   wideTransitionTable$bmi <- factor(wideTransitionTable$bmi, levels = c('less.than.18.5', '18.5.to.25', '25.to.30', 'greater.than.30'))
   
   wideTransitionTable$bmi <- relevel(wideTransitionTable$bmi, ref = '18.5.to.25')
+  wideTransitionTable$ethnicity <- factor(wideTransitionTable$ethnicity, levels = c("White", "Indian", "Unknown", "Mixed", "Bl_Afric", "Other", 
+                     "Chinese", "Bl_Other", "Bangladesi", "Pakistani", 
+                     "Oth_Asian", "Bl_Carib"))
+  wideTransitionTable$ethnicity <- relevel(wideTransitionTable$ethnicity, ref = 'White')
   wideTransitionTable$latestSmokingStatus <- relevel(wideTransitionTable$latestSmokingStatus, ref = 'Non smoker')
   
   return(wideTransitionTable)
@@ -775,6 +839,36 @@ analyseLifestyleFactors <- function() {
   }
 }
 
+replaceCovariates <- function(wideTransitionTable, baselineTable) {
+  # Define the covariates to replace
+  covariates <- c("bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
+                  "glucose", "sbp", "dbp", "hba1c")
+  
+  # Extract the subset of wideTransitionTable that matches baselineTable
+  matchedRows <- wideTransitionTable[patid %in% baselineTable$patid]
+  
+  # Perform a full join between matched rows from wideTransitionTable and baselineTable
+  updatedTransitionTable <- merge(matchedRows, baselineTable[, c("patid", covariates), with = FALSE], 
+                                  by = "patid", 
+                                  all.x = TRUE, 
+                                  suffixes = c("", "_baseline"))
+  
+  # Replace covariate values in wideTransitionTable only where non-missing in baselineTable
+  for (cov in covariates) {
+    updatedTransitionTable[[cov]] <- ifelse(!is.na(updatedTransitionTable[[paste0(cov, "_baseline")]]),
+                                            updatedTransitionTable[[paste0(cov, "_baseline")]],
+                                            updatedTransitionTable[[cov]])
+    updatedTransitionTable[[paste0(cov, "_baseline")]] <- NULL  # Remove the temporary columns
+  }
+  
+  # Find the unmatched rows from the original wideTransitionTable
+  unmatchedRows <- wideTransitionTable[!(patid %in% baselineTable$patid)]
+  
+  # Combine the updated rows with the unmatched rows
+  finalTransitionTable <- rbind(updatedTransitionTable, unmatchedRows)
+  
+  return(finalTransitionTable)
+}
 
 ################################################################################
 ############################################################@@@@@@@ Utilities
@@ -807,5 +901,6 @@ transitionNames <- list(
   '12' = "Stroke - 1 event to Death",
   '13' = "Stroke - >1 event to Death"
 )
+
 
 

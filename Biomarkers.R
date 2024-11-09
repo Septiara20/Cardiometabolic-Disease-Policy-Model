@@ -23,16 +23,8 @@ library(forcats)
 #install_github("Exeter-Diabetes/EHRBiomarkr")
 library(EHRBiomarkr)
 observationDataset <- open_dataset('Data/Observation/')
-################################################################################
-# Functions
-################################################################################
 
-####################################################################
-# Simple data extraction functions
-# These are necessary precursors to baseline table generation
-####################################################################
-
-###############################################################################
+################################################################################
 # Biomarker code called from SurvivalAnalysis.R is in this section
 
 # Gets the date of the first CMD event for patients who have a CMD event
@@ -367,75 +359,206 @@ calculateStatisticsByGroup <- function(data, columnName, breaks, genderLevels = 
   # Ensure gender is treated as a factor with levels in the desired order
   data$gender <- factor(data$gender, levels = genderLevels)
   
+  # Filter data to exclude NAs for the column of interest
+  non_na_data <- data[!is.na(data[[columnName]]), ]
+  non_na_count <- nrow(non_na_data)
+  
   # Create a new grouping variable based on numerical groupings
-  data <- data %>%
+  non_na_data <- non_na_data %>%
     mutate(group = cut(get(columnName), breaks = breaks, include.lowest = TRUE, right = FALSE))
-
-  # Calculate total population count for percentage calculation
-  total_population <- nrow(data)
-
+  
   # Calculate mean, standard deviation, and count for each group by gender
-  stats_table <- data %>%
+  stats_table <- non_na_data %>%
     group_by(group, gender) %>%
     summarise(
       count = n(), 
       mean = sprintf("%.2f", mean(get(columnName), na.rm = TRUE)),  # Format mean to 2 decimal places as string
-      sd = sd(get(columnName), na.rm = TRUE),
+      sd = sprintf("%.2f", sd(get(columnName), na.rm = TRUE)),      # Format sd to 2 decimal places as string
       .groups = 'drop'
     ) %>%
-    mutate(percentage = sprintf("%.2f", (count / total_population * 100))) %>%  # Format percentage to 2 decimal places as string
+    mutate(percentage = sprintf("%.2f", (count / non_na_count * 100))) %>%  # Format percentage to 2 decimal places as string
     select(group, gender, mean, sd, count, percentage)  # Specifying order of columns
-
+  
+  # Calculate overall statistics
+  overall_mean <- mean(non_na_data[[columnName]], na.rm = TRUE)
+  overall_sd <- sd(non_na_data[[columnName]], na.rm = TRUE)
+  overall_median <- median(non_na_data[[columnName]], na.rm = TRUE)
+  
+  # Create summary rows for overall mean, median, and standard deviation
+  summary_rows <- data.frame(
+    group = c("Overall Mean", "Overall SD", "Overall Median"),
+    gender = NA,  # No specific gender grouping for these overall stats
+    mean = c(sprintf("%.2f", overall_mean), NA, sprintf("%.2f", overall_median)),  # Place mean and median here
+    sd = c(NA, sprintf("%.2f", overall_sd), NA),  # Place standard deviation in the "Overall SD" row
+    count = c(non_na_count, non_na_count, non_na_count),
+    percentage = c("100.00", "100.00", "100.00")
+  )
+  
+  # Bind the summary rows to the bottom of the stats table
+  stats_table <- rbind(stats_table, summary_rows)
+  
   return(stats_table)
 }
 
-getDescriptiveStatistics <- function(data) {
+getDescriptiveStatistics <- function(baselineTable, wideTransitionTable) {
   # BMI
   bmiBreaks <- c(0, 18.5, 25, 30, Inf)
   print("BMI data is below:")
-  print(calculateStatisticsByGroup(data, "bmi", bmiBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "bmi", bmiBreaks))
   
   # HDL
   hdlBreaks <- c(0, 1.03, 1.55, Inf)
   print("HDL data is below:")
-  print(calculateStatisticsByGroup(data, "hdl", hdlBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "hdl", hdlBreaks))
   
   # LDL
   ldlBreaks <- c(0, 2.6, 3.4, 4, 4.9, Inf)
   print("LDL data is below:")
-  print(calculateStatisticsByGroup(data, "ldl", ldlBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "ldl", ldlBreaks))
   
   # Triglycerides
   triglyBreaks <- c(0, 1.7, 2.3, 5.6, Inf)
   print("Triglycerides data is below:")
-  print(calculateStatisticsByGroup(data, "triglycerides", triglyBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "triglycerides", triglyBreaks))
   
   # Total Cholesterol
   totalCholBreaks <- c(0, 5, 5.5, 6, Inf)
   print("Total Cholesterol data is below:")
-  print(calculateStatisticsByGroup(data, "cholesterol", totalCholBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "cholesterol", totalCholBreaks))
   
   # Glucose
   glucoseBreaks <- c(0, 5.5, 7, Inf)
   print("Glucose data is below:")
-  print(calculateStatisticsByGroup(data, "glucose", glucoseBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "glucose", glucoseBreaks))
   
   # Systolic Blood Pressure (SBP)
   sbpBreaks <- c(0, 120, 140, Inf)
   print("Systolic Blood Pressure (SBP) data is below:")
-  print(calculateStatisticsByGroup(data, "sbp", sbpBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "sbp", sbpBreaks))
   
   # Diastolic Blood Pressure (DBP)
   dbpBreaks <- c(0, 80, 90, Inf)
   print("Diastolic Blood Pressure (DBP) data is below:")
-  print(calculateStatisticsByGroup(data, "dbp", dbpBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "dbp", dbpBreaks))
   
   # HbA1c
   hba1cBreaks <- c(0, 42, 48, Inf)
   print("HbA1c data is below:")
-  print(calculateStatisticsByGroup(data, "hba1c", hba1cBreaks))
+  print(calculateStatisticsByGroup(baselineTable, "hba1c", hba1cBreaks))
+  
+  ageBreaks <- c(-Inf, 24, 34, 44, 54, 64, Inf)
+  print("Age data is below:")
+  print(calculateStatisticsByGroup(wideTransitionTable, "age", ageBreaks))
+  
+  # Additional categories using calculateValueMatches
+  print("Deprivation index data is below:")
+  print(calculateValueMatches(wideTransitionTable, "deprivationIndex"))
+  
+  print("Diabetes family history data is below:")
+  print(calculateValueMatches(wideTransitionTable, "diabetesFH"))
+  
+  print("Cardiovascular disease family history data is below:")
+  print(calculateValueMatches(wideTransitionTable, "cvdFH"))
+  
+  print("Hyperlipidaemia data is below:")
+  print(calculateValueMatches(wideTransitionTable, "hyperlipidaemia"))
+  
+  print("Hypertension data is below:")
+  print(calculateValueMatches(wideTransitionTable, "hypertension"))
+  
+  print("Alcohol consumption data is below:")
+  print(calculateValueMatches(wideTransitionTable, "alcoholStatus"))
+  
+  print("Smoking status data is below:")
+  print(calculateValueMatches(wideTransitionTable, "latestSmokingStatus"))
+  
+  print("Atrial fibrillation data is below:")
+  print(calculateValueMatches(wideTransitionTable, "atrialFib"))
 }
 
+calculateValueMatches <- function(data, columnName, genderLevels = c("M", "F")) {
+  # Work with a copy of the data to avoid modifying the original
+  data_copy <- data
+  
+  # Convert gender to character for transformation
+  data_copy$gender <- as.character(data_copy$gender)
+  
+  # Convert 'Female' to 'F' and 'Male' to 'M'
+  data_copy$gender <- ifelse(data_copy$gender == "Female", "F",
+                       ifelse(data_copy$gender == "Male", "M", data_copy$gender))
+  
+  # Convert gender back to a factor with the specified levels
+  data_copy$gender <- factor(data_copy$gender, levels = genderLevels)
+  
+  # Get unique values from the specified column
+  matchValues <- unique(data_copy[[columnName]])
+  
+  # Filter data to include only rows where the column matches one of the specified values
+  filtered_data <- data_copy %>%
+    filter(get(columnName) %in% matchValues)
+  
+  # Calculate counts and percentages
+  results <- filtered_data %>%
+    group_by(Value = get(columnName), gender) %>%
+    summarise(Count = n(), .groups = 'drop') %>%
+    mutate(Total = sum(Count)) %>%
+    group_by(Value) %>%
+    mutate(Percentage = sprintf("%.2f", round((Count / Total * 100), 2))) %>%
+    ungroup() %>%
+    select(Value, gender, Count, Percentage) %>%
+    arrange(Value, gender)
+  
+  return(results)
+}
+
+extractBooleanObservations <- function(cmdPatientBiomarkers, nonCmdPatientBiomarkers, medcodeVar, type) {
+    # Convert the specified medcode variable to integer64, assuming it's available in the environment
+  medcodes <- as.integer64(medcodeVar)
+  
+  # Filter for observations based on the specified medcodes for both CMD and Non-CMD patients
+  cmdObservations <- cmdPatientBiomarkers[medcodeid %in% medcodes]
+  nonCmdObservations <- nonCmdPatientBiomarkers[medcodeid %in% medcodes]
+  
+  # Add a new column to indicate 'CMD' or 'Non-CMD'
+  cmdObservations[, patientType := 'CMD']
+  nonCmdObservations[, patientType := 'Non-CMD']
+  
+  # Combine the two data.tables
+  combinedObservations <- rbind(cmdObservations, nonCmdObservations)
+  
+  message(glue("Number of patients who have this type of biomarker ({type}): {length(unique(combinedObservations[,patid]))}"))
+  message(glue("Overall number of biomarker observations: {nrow(combinedObservations)}"))
+  
+  return(combinedObservations)
+}
+# Extracts the subset of observations matching a medcodeid vector parameter
+extractObservations <- function(cmdPatientBiomarkers, nonCmdPatientBiomarkers, medcodeVar, type) {
+  # Convert the specified medcode variable to integer64, assuming it's available in the environment
+  medcodes <- as.integer64(medcodeVar)
+  
+  # Filter for observations based on the specified medcodes for both CMD and Non-CMD patients
+  cmdObservations <- cmdPatientBiomarkers[medcodeid %in% medcodes]
+  nonCmdObservations <- nonCmdPatientBiomarkers[medcodeid %in% medcodes]
+  
+  # Add a new column to indicate 'CMD' or 'Non-CMD'
+  cmdObservations[, patientType := 'CMD']
+  nonCmdObservations[, patientType := 'Non-CMD']
+  
+  # Combine the two data.tables
+  combinedObservations <- rbind(cmdObservations, nonCmdObservations)
+  
+  message(glue("Number of patients who have this type of biomarker ({type}): {length(unique(combinedObservations[,patid]))}"))
+  message(glue("Overall number of biomarker observations: {nrow(combinedObservations)}"))
+
+  # Use EHRBiomarkr library to remove invalid values
+  combinedObservations <- clean_biomarker_values(combinedObservations, value, type)
+  
+  message(glue("Number of patients who have this type of biomarker after cleaning: ({type}): {length(unique(combinedObservations[,patid]))}"))
+  message(glue("Overall number of biomarker observations after cleaning: {nrow(combinedObservations)}"))
+
+  
+  return(combinedObservations)
+}
 
 ###############################################################################
 
@@ -688,54 +811,6 @@ getCMDBiomarkerObservations <- function(firstCMDEventDates) {
 # Baseline table generation functions
 ##################################
 
-extractBooleanObservations <- function(cmdPatientBiomarkers, nonCmdPatientBiomarkers, medcodeVar, type) {
-    # Convert the specified medcode variable to integer64, assuming it's available in the environment
-  medcodes <- as.integer64(medcodeVar)
-  
-  # Filter for observations based on the specified medcodes for both CMD and Non-CMD patients
-  cmdObservations <- cmdPatientBiomarkers[medcodeid %in% medcodes]
-  nonCmdObservations <- nonCmdPatientBiomarkers[medcodeid %in% medcodes]
-  
-  # Add a new column to indicate 'CMD' or 'Non-CMD'
-  cmdObservations[, patientType := 'CMD']
-  nonCmdObservations[, patientType := 'Non-CMD']
-  
-  # Combine the two data.tables
-  combinedObservations <- rbind(cmdObservations, nonCmdObservations)
-  
-  message(glue("Number of patients who have this type of biomarker ({type}): {length(unique(combinedObservations[,patid]))}"))
-  message(glue("Overall number of biomarker observations: {nrow(combinedObservations)}"))
-  
-  return(combinedObservations)
-}
-# Extracts the subset of observations matching a medcodeid vector parameter
-extractObservations <- function(cmdPatientBiomarkers, nonCmdPatientBiomarkers, medcodeVar, type) {
-  # Convert the specified medcode variable to integer64, assuming it's available in the environment
-  medcodes <- as.integer64(medcodeVar)
-  
-  # Filter for observations based on the specified medcodes for both CMD and Non-CMD patients
-  cmdObservations <- cmdPatientBiomarkers[medcodeid %in% medcodes]
-  nonCmdObservations <- nonCmdPatientBiomarkers[medcodeid %in% medcodes]
-  
-  # Add a new column to indicate 'CMD' or 'Non-CMD'
-  cmdObservations[, patientType := 'CMD']
-  nonCmdObservations[, patientType := 'Non-CMD']
-  
-  # Combine the two data.tables
-  combinedObservations <- rbind(cmdObservations, nonCmdObservations)
-  
-  message(glue("Number of patients who have this type of biomarker ({type}): {length(unique(combinedObservations[,patid]))}"))
-  message(glue("Overall number of biomarker observations: {nrow(combinedObservations)}"))
-
-  # Use EHRBiomarkr library to remove invalid values
-  combinedObservations <- clean_biomarker_values(combinedObservations, value, type)
-  
-  message(glue("Number of patients who have this type of biomarker after cleaning: ({type}): {length(unique(combinedObservations[,patid]))}"))
-  message(glue("Overall number of biomarker observations after cleaning: {nrow(combinedObservations)}"))
-
-  
-  return(combinedObservations)
-}
 # This function produces the baseline biomarker table.
 
 # This function produces additional data complementing the baseline table, without augmenting the original table.
@@ -932,27 +1007,27 @@ calculateAgeGenderDistribution <- function(baselineTable) {
   return(list(percentage_table = percentage_table, std_dev_table = std_dev_table))
 }
 
-calculateValueMatches <- function(data, columnName, matchValues, genderLevels = c("M", "F", "I")) {
-  # Ensure gender is treated as a factor with levels in the desired order
-  data$gender <- factor(data$gender, levels = genderLevels)
-  
-  # Filter data to include only rows where the column matches one of the specified values
-  filtered_data <- data %>%
-    filter(get(columnName) %in% matchValues)
-
-  # Calculate counts and percentages
-  results <- filtered_data %>%
-    group_by(Value = get(columnName), gender) %>%
-    summarise(Count = n(), .groups = 'drop') %>%
-    mutate(Total = sum(Count)) %>%
-    group_by(Value) %>%
-    mutate(Percentage = sprintf("%.2f", round((Count / Total * 100), 2))) %>%
-    ungroup() %>%
-    select(Value, gender, Count, Percentage) %>%
-    arrange(Value, gender)
-
-  return(results)
-}
+# calculateValueMatches <- function(data, columnName, matchValues, genderLevels = c("M", "F", "I")) {
+#   # Ensure gender is treated as a factor with levels in the desired order
+#   data$gender <- factor(data$gender, levels = genderLevels)
+#   
+#   # Filter data to include only rows where the column matches one of the specified values
+#   filtered_data <- data %>%
+#     filter(get(columnName) %in% matchValues)
+# 
+#   # Calculate counts and percentages
+#   results <- filtered_data %>%
+#     group_by(Value = get(columnName), gender) %>%
+#     summarise(Count = n(), .groups = 'drop') %>%
+#     mutate(Total = sum(Count)) %>%
+#     group_by(Value) %>%
+#     mutate(Percentage = sprintf("%.2f", round((Count / Total * 100), 2))) %>%
+#     ungroup() %>%
+#     select(Value, gender, Count, Percentage) %>%
+#     arrange(Value, gender)
+# 
+#   return(results)
+# }
 
 showMultiDiseaseStats <- function(survivalTable) {
   message(glue("Number of heart attack-only patients: {nrow(survivalTable[stroke == FALSE & mi == TRUE & diabetes == FALSE])}"))
