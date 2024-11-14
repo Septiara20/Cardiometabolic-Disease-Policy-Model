@@ -31,7 +31,6 @@ observationDataset <- open_dataset('Data/Observation/')
 ################################################################################
 # Load other code here
 source("Biomarkers.R")
-source("TimeDependencies.R")
 ################################################################################
 
 getQualifyingPatients <- function() {
@@ -522,6 +521,27 @@ addEthnicity <- function(wideTransitionTable, sampledEpiHes) {
   return(wideTransitionTable)
 }
 
+regroupEthnicity <- function(wideTransitionTable) {
+  # Define a mapping for the ethnicities
+  ethnicityMapping <- list(
+    "White" = c("White"),
+    "Black" = c("Bl_Afric", "Bl_Carib", "Bl_Other"),
+    "Asian" = c("Indian", "Pakistani", "Bangladesi", "Oth_Asian", "Chinese"),
+    "Mixed" = c("Mixed"),
+    "Other" = c("Other", "Unknown")
+  )
+  
+  # Apply the mapping
+  wideTransitionTable[, ethnicity := as.character(ethnicity)] # Ensure ethnicity is character
+  wideTransitionTable[, ethnicity := sapply(ethnicity, function(x) {
+    # Find the group the value belongs to
+    group <- names(ethnicityMapping)[sapply(ethnicityMapping, function(values) x %in% values)]
+    if (length(group) == 1) return(group) else return("other") # Default to "other" if not matched
+  })]
+  
+  return(wideTransitionTable)
+}
+
 
 addAlcoholStatus <- function(wideTransitionTable) {
   # Define the end date of the study (based on earlier conversations, assuming it's 2019-12-31)
@@ -624,19 +644,6 @@ prepareDataForModel <- function (transitionMatrix, wideTransitionTable, covariat
   #preparedData <- addTimeDependentAge(preparedData, wideTransitionTable)
   return(preparedData)
 }
-
-# # Can generalise for different covariates, but let's worry about that later
-# includeCovariates <- function(preparedMStateData, wideTransitionTable) {
-#   message("Expanding time-independent covariates gender, deprivationIndex, diabetesFH and cvdFH...")
-#   covariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH")
-#   
-#   preparedMStateData <- expand.covs(preparedMStateData, covariates, append = TRUE, longnames = TRUE)
-#   
-#   message("Adding time-dependent covariate age...")
-#   preparedMStateData <- addTimeDependentAge(preparedMStateData, wideTransitionTable)
-#   return(preparedMStateData)
-# }
-
 
 includeCovariates <- function(preparedMStateData, wideTransitionTable, covariates) {
   # Separate time-dependent and time-independent covariates
@@ -786,7 +793,7 @@ doRunModelForTransitionsAndCov <- function(wideTransitionTable, transitionMatrix
   }
 }
 
-addFactors <- function(wideTransitionTable) 
+addFactors <- function(wideTransitionTable, categoriesOnly = FALSE) 
 {
   wideTransitionTable$gender <- factor(wideTransitionTable$gender, levels = c("Male", "Female"))
   wideTransitionTable$deprivationIndex <- factor(wideTransitionTable$deprivationIndex, levels = c(1, 2, 3, 4, 5))
@@ -797,12 +804,12 @@ addFactors <- function(wideTransitionTable)
                                                                                             'AlcoholConsumptionLevel1', 
                                                                                             'AlcoholConsumptionLevel2', 
                                                                                             'AlcoholConsumptionLevel3'))
-  wideTransitionTable$bmi <- factor(wideTransitionTable$bmi, levels = c('less.than.18.5', '18.5.to.25', '25.to.30', 'greater.than.30'))
-  
-  wideTransitionTable$bmi <- relevel(wideTransitionTable$bmi, ref = '18.5.to.25')
-  wideTransitionTable$ethnicity <- factor(wideTransitionTable$ethnicity, levels = c("White", "Indian", "Unknown", "Mixed", "Bl_Afric", "Other", 
-                     "Chinese", "Bl_Other", "Bangladesi", "Pakistani", 
-                     "Oth_Asian", "Bl_Carib"))
+  if (categoriesOnly == TRUE) 
+  {
+    wideTransitionTable$bmi <- factor(wideTransitionTable$bmi, levels = c('less.than.18.5', '18.5.to.25', '25.to.30', 'greater.than.30'))
+    wideTransitionTable$bmi <- relevel(wideTransitionTable$bmi, ref = '18.5.to.25')
+  }
+  wideTransitionTable$ethnicity <- factor(wideTransitionTable$ethnicity, levels = c("White", "Black", "Asian", "Mixed", "Other"))
   wideTransitionTable$ethnicity <- relevel(wideTransitionTable$ethnicity, ref = 'White')
   wideTransitionTable$latestSmokingStatus <- relevel(wideTransitionTable$latestSmokingStatus, ref = 'Non smoker')
   

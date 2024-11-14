@@ -1,8 +1,8 @@
 source("Biomarkers.R")
+source("Continuous.R")
 
-# Define the medcode IDs for each covariate based on your mappings
-
-# Use covariate names that directly match msdata
+# Constants
+################################################################################
 covariateMedcodes <- list(
   bmi = medcodeBMI$medcodeid,
   hdl = medcodeHDL$medcodeid,
@@ -19,7 +19,7 @@ ehrNamesMap <- list(
   bmi = "bmi",
   hdl = "hdl",
   ldl = "ldl",
-  triglycerides = "triglyceride", # Fix name mismatch
+  triglycerides = "triglyceride",
   cholesterol = "totalcholesterol",
   glucose = "fastingglucose",
   sbp = "sbp",
@@ -27,7 +27,16 @@ ehrNamesMap <- list(
   hba1c = "hba1c"
 )
 
-# Updated function to fetch the most recent value of a covariate
+allCovariates <- c("gender", "deprivationIndex", "diabetesFH", "cvdFH", 
+              "bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
+              "glucose", "sbp", "dbp", "latestSmokingStatus", 
+              "atrialFib", "hyperlipidaemia", "hypertension", 
+              "age", "ethnicity", "alcoholStatus")
+
+biomarkerCovariates <- c("bmi", "hdl", "ldl", "triglycerides", "cholesterol", 
+                         "glucose", "sbp", "dbp")
+################################################################################
+
 getMostRecentCovariateValues <- function(observationDataset, covariateName, medcodeID, msdata, ehrName) {
   message(glue("Fetching most recent values for {covariateName}"))
   
@@ -80,20 +89,17 @@ getMostRecentCovariateValues <- function(observationDataset, covariateName, medc
   return(msdata)
 }
 
-# Updated function to apply time-dependent covariates
-applyTimeDependentCovariates <- function(msdata, observationDataset, covariateMedcodes, ehrNamesMap) {
+addTimeDependentCovariates <- function(msdata, observationDataset) {
   message("Applying time-dependent covariates...")
 
-  # Debug: Check mappings before starting
   message("CovariateMedcodes: ", paste(names(covariateMedcodes), collapse = ", "))
   message("ehrNamesMap: ", paste(names(ehrNamesMap), collapse = ", "))
 
-  # Process each covariate
   for (covariateName in names(covariateMedcodes)) {
     # Get the corresponding EHR name for cleaning
     ehrName <- ehrNamesMap[[covariateName]]
     if (is.null(ehrName)) {
-      stop(glue("Mapping for {covariateName} is missing in ehrNamesMap. Check your map!"))
+      stop(glue("Mapping for {covariateName} is missing in ehrNamesMap. Check map!"))
     }
     
     message(glue("Processing covariate: {covariateName} (cleaning as {ehrName})"))
@@ -108,32 +114,84 @@ applyTimeDependentCovariates <- function(msdata, observationDataset, covariateMe
 
   message("Completed applying time-dependent covariates.")
   
-  # Convert patid back to a factor if necessary for downstream compatibility
+  # Convert patid back to a factor to match original format
   msdata[, patid := as.factor(patid)]
   
   return(msdata)
 }
 
-addTimeDependentAge <- function(msdata, wideTransitionTable) {
-  # Merge the age from wideTransitionTable into msdata based on patid
-  #msdata <- merge(msdata, wideTransitionTable[, .(patid, age)], by = "patid", all.x = TRUE)
-  
-  # Calculate age at each Tstart (in years)
-  msdata$age_at_Tstart <- msdata$age + (msdata$Tstart / 365.25)
-
-  # Define the age categories based on the updated age
-  msdata$age <- cut(msdata$age_at_Tstart, 
-                    breaks = c(-Inf, 24, 34, 44, 54, 64, Inf),
-                    labels = c("18-24", "25-34", "35-44", "45-54", "55-64", ">65"),
-                    right = FALSE)  # Adjust to include the lower bound correctly
-
-  # Check for any NAs and handle them
-  if (any(is.na(msdata$age))) {
-    cat("Warning: NAs found in age after cutting. Consider reviewing the age ranges or input data.\n")
-  }
-
-  # Clean up intermediate columns if not needed
-  msdata <- msdata[, !names(msdata) %in% c("age_at_Tstart")]
-
-  return(msdata)
+buildContinuousData <- function(wideTransitionTable, observationDataset) {
+    wideTransitionTable <- convertNAsToFalse(wideTransitionTable)
+    wideTransitionTable <- replaceSpecialCharacters(wideTransitionTableContSub)
+    wideTransitionTable <- addFactors(wideTransitionTable)
+    msdata <- prepareDataForModel(transitionMatrix, wideTransitionTable, allCovariates)
+    msdata <- addContinuousTimeDependentAge(msdata, wideTransitionTable)
+    msdata <- addTimeDependentCovariates(msdata, observationDataset)
+    return(msdata)
 }
+
+buildCategoricalData <- function(wideTransitionTable, observationDataset) {
+    wideTransitionTable <- convertNAsToFalse(wideTransitionTable)
+    wideTransitionTable <- replaceSpecialCharacters(wideTransitionTable)
+    wideTransitionTable <- addFactors(wideTransitionTable, TRUE)
+    msdata <- prepareDataForModel(transitionMatrix, wideTransitionTable, allCovariates)
+    msdata <- addTimeDependentAge(msdata, wideTransitionTable)
+    msdata <- addTimeDependentCovariates(msdata, observationDataset)
+    msdata <- performCategorization(msdata)
+    return(msdata)
+}
+
+runContinuousCoxTimeDep <- function(msData, transition) {
+    message(glue("Fitting model for transition: {transition} and covariates: {paste(covariates, collapse = ', ')}"))
+    setDT(msData)
+    filteredData <- msData[trans == transition]
+    filteredData <- as.data.frame(filteredData)
+    gc() 
+    rm(msData)
+    gc()
+
+    # Step 4: Construct model representing Cox survival function
+    formula <- as.formula(paste("Surv(Tstart, Tstop, status) ~", paste(allCovariates, collapse = " + ")))
+    
+    # Remove factors (only categorical data needs factors)
+    for (cov in biomarkerCovariates) {
+      if (is.factor(filteredData[[cov]])) {
+        filteredData[[cov]] <- as.numeric(as.character(filteredData[[cov]]))
+      }
+    }
+
+    # Step 5: Fit Cox model with the expanded covariates
+    filteredData$bmi <- round(filteredData$bmi, 1)
+    coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
+    
+    return(coxModel)
+}
+
+runCategoricalCoxTimeDep <- function(msData, transition) {
+    message(glue("Fitting model for transition: {transition} and covariates: {paste(covariates, collapse = ', ')}"))
+    setDT(msData)
+    filteredData <- msData[trans == transition]
+    filteredData <- as.data.frame(filteredData)
+    gc() 
+    rm(msData)
+    gc()
+
+    # Step 4: Construct model representing Cox survival function
+    formula <- as.formula(paste("Surv(Tstart, Tstop, status) ~", paste(allCovariates, collapse = " + ")))
+
+    # Step 5: Fit Cox model with the expanded covariates
+    coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
+    
+    return(coxModel)
+}
+
+normalizePatidType <- function(data) {
+  if (is.factor(data$patid)) {
+    data[, patid := as.numeric(as.character(patid))]
+  } else if (!is.numeric(data$patid)) {
+    data[, patid := as.numeric(patid)]
+  }
+  return(data)
+}
+
+
