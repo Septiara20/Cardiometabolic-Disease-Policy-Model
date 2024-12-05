@@ -120,6 +120,14 @@ addTimeDependentCovariates <- function(msdata, observationDataset) {
   return(msdata)
 }
 
+restoreMsdataClass <- function(msdata, transitionMatrix) {
+  if (is.null(attr(msdata, "trans"))) {
+    attr(msdata, "trans") <- transitionMatrix
+  }
+  class(msdata) <- c("msdata", class(msdata))
+  return(msdata)
+}
+
 buildContinuousData <- function(wideTransitionTable, observationDataset) {
     wideTransitionTable <- convertNAsToFalse(wideTransitionTable)
     wideTransitionTable <- replaceSpecialCharacters(wideTransitionTableContSub)
@@ -127,6 +135,7 @@ buildContinuousData <- function(wideTransitionTable, observationDataset) {
     msdata <- prepareDataForModel(transitionMatrix, wideTransitionTable, allCovariates)
     msdata <- addContinuousTimeDependentAge(msdata, wideTransitionTable)
     msdata <- addTimeDependentCovariates(msdata, observationDataset)
+    msdata <- restoreMsdataClass(msdata, transitionMatrix)
     return(msdata)
 }
 
@@ -138,10 +147,11 @@ buildCategoricalData <- function(wideTransitionTable, observationDataset) {
     msdata <- addTimeDependentAge(msdata, wideTransitionTable)
     msdata <- addTimeDependentCovariates(msdata, observationDataset)
     msdata <- performCategorization(msdata)
+    msdata <- restoreMsdataClass(msdata, transitionMatrix)
     return(msdata)
 }
 
-runContinuousCoxTimeDep <- function(msData, transition) {
+runContinuousCoxTimeDep <- function(msData, covariates, transition) {
     message(glue("Fitting model for transition: {transition} and covariates: {paste(covariates, collapse = ', ')}"))
     setDT(msData)
     filteredData <- msData[trans == transition]
@@ -161,13 +171,12 @@ runContinuousCoxTimeDep <- function(msData, transition) {
     }
 
     # Step 5: Fit Cox model with the expanded covariates
-    filteredData$bmi <- round(filteredData$bmi, 1)
     coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
     
     return(coxModel)
 }
 
-runCategoricalCoxTimeDep <- function(msData, transition) {
+runCategoricalCoxTimeDep <- function(msData, covariates, transition) {
     message(glue("Fitting model for transition: {transition} and covariates: {paste(covariates, collapse = ', ')}"))
     setDT(msData)
     filteredData <- msData[trans == transition]
@@ -182,7 +191,26 @@ runCategoricalCoxTimeDep <- function(msData, transition) {
     # Step 5: Fit Cox model with the expanded covariates
     coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
     
-    return(coxModel)
+    # Get summary and round coefficients and confidence intervals
+    summaryModelCox <- summary(coxModel)
+    coefs <- summaryModelCox$coefficients
+    coefs <- round(coefs, 3)
+    
+    # Add confidence intervals
+    confInterval <- round(confint(coxModel), 3)
+    
+    # Combine coefficients with confidence intervals
+    resultValueCox <- data.frame(
+        Estimate = round(coefs[, "coef"],3),
+        `Hazard Ratio` = round(exp(coefs[, "coef"]),3),
+        `Std. Error` = round(coefs[, "se(coef)"], 3),
+        `z value` = round(coefs[, "z"], 3),
+        `Pr(>|z|)` = round(coefs[, "Pr(>|z|)"], 3),
+        `Lower CI` = round(confInterval[, 1], 3),
+        `Upper CI` = round(confInterval[, 2], 3)
+    )
+    
+  return(list(model = coxModel, results = resultValueCox))
 }
 
 normalizePatidType <- function(data) {
@@ -194,4 +222,16 @@ normalizePatidType <- function(data) {
   return(data)
 }
 
-
+removeFactors <- function(data, covList) {
+  # Loop through each column in the list
+  for (col in covList) {
+    if (col %in% names(data)) { # Check if the column exists in the data
+      if (is.factor(data[[col]])) { # Check if the column is a factor
+        data[[col]] <- as.character(data[[col]]) # Convert factor to character
+      }
+    } else {
+      warning(glue("Column {col} not found in the dataset.")) # Warn if column doesn't exist
+    }
+  }
+  return(data)
+}

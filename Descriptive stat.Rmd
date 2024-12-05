@@ -1,5 +1,5 @@
 ---
-title: "Multi-state Modelling"
+title: "Descriptive Statistic"
 author: "Septiara Putri"
 date: "2024-08-30"
 output: html_document
@@ -12,32 +12,28 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Description 
 This is a descriptive statistic and multistate model analysis using CPRD Aurum data.
-State transition model (STM) consists of several states representing cardiometabolic disease (CMD) progression. The structure of model is published at:  https://bmchealthservres.biomedcentral.com/articles/10.1186/s12913-024-11559-y. States: disease free, type 2 diabetes (T2DM), Stroke, MI, Post-stroke, Post-MI, Deat
-Multistate model extends survival analysis to scenarios where individuals or units can transition between multiple states over time. Each state transition is treated as a distinct event
-
+State transition model (STM) consists of several states representing cardiometabolic disease (CMD) progression. The structure of model is published at:  https://bmchealthservres.biomedcentral.com/articles/10.1186/s12913-024-11559-y. 
+States: disease free, type 2 diabetes (T2DM), Stroke, MI, Post-stroke, Post-MI, Death
 
 ```{r set the working directory, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
 setwd("/Users/septiaraputri/Desktop/RParquet/PrepareAurumData")
-msmData<-read.csv("/Users/septiaraputri/Desktop/RParquet/PrepareAurumData/wideTransitionTableSubset.csv")
+msmData<-read.csv("/Users/septiaraputri/Desktop/RParquet/PrepareAurumData/wideTransitionTableContSub.csv")
 ```
 
 ```{r load library, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
-library(cmprsk)
 library(data.table)
 library(dplyr)
-library(kableExtra)
 library(knitr)
 library(ggplot2)
 library(mstate)
-library(patchwork)
-library(psych)
 library(tidyr)
-library(survminer)
 ```
+
+
 
 # Non-modifiable risks factors
 ```{r desc stat AGE, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-#Age
+# Specify age group, summary statistic
 msmData <-msmData %>%
   mutate(ageGroup = cut(age, breaks =c(0, 18, 30, 45, 60, 75, Inf),
                          labels = c("<18","18-29","30-44","45-59","60-74", "≥75"),
@@ -51,44 +47,62 @@ descAge <-msmData %>%
     meanAge = round(mean (age, na.rm=TRUE), 2),
     medianAge = round(median(age, na.rm=TRUE), 2),
     sdAge = round(sd(age, na.rm = TRUE), 2),
-    Q1_Age = round(quantile(age, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
-    Q3_Age = round(quantile(age, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
-    iqrAge = round(IQR(age, na.rm = TRUE), 2),              # Interquartile Range (IQR)
+    Q1_Age = round(quantile(age, 0.25, na.rm = TRUE), 2),   
+    Q3_Age = round(quantile(age, 0.75, na.rm = TRUE), 2),   
+    iqrAge = round(IQR(age, na.rm = TRUE), 2),
+    minAge = round(min(age, na.rm = TRUE), 2),  
+    maxAge = round(max(age, na.rm = TRUE), 2), 
     .groups = 'drop'
     
   ) 
-overallAge <- msmData %>%
-  summarise(
-    ageGroup = "Overall",
-    gender = "All",
-    count = n(),
-    percentage = 100,
-    meanAge = round(mean(age, na.rm = TRUE), 2),
-    medianAge = round(median(age, na.rm = TRUE), 2),
-    sdAge = round(sd(age, na.rm = TRUE), 2),
-    Q1_Age = round(quantile(age, 0.25, na.rm = TRUE), 2),
-    Q3_Age = round(quantile(age, 0.75, na.rm = TRUE), 2),
-    iqrAge = round(IQR(age, na.rm = TRUE), 2)
-  )
 
-# Combine grouped and overall summaries
-descAge <- bind_rows(descAge, overallAge)
-
-#print table
+# Print table
 print(descAge)
-#chart: age
-ggplot(descAge, aes(x = ageGroup, y = percentage, fill = gender)) +
+
+# Plot by gender
+# Bar plot
+barPlot_age<-ggplot(descAge, aes(x = ageGroup, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
-  labs(title = "Age distribution by gender (%)",
+  labs(title = "Age",
        x = "Age group",
-       y = "Percentage",
+       y = "Percentage (%)",
        fill = "Gender") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust=0.5,margin = margin(b = 30)))
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),  
+    axis.title.x = element_text(size = 10, margin = margin(t=10)), 
+    axis.title.y = element_text(size = 10),  
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),  
+    axis.text.y = element_text(size = 8)  
+  ) +
+  scale_fill_brewer(palette = "Set1")
+  print(barPlot_age)
+ 
+# Box plot 
+boxPlot_age <- ggplot(msmData, aes(x = gender, y = age, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  scale_y_continuous(name = "Age") +
+  scale_x_discrete(name = "Gender") +
+  labs(
+    title = "Age Distribution",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8)
+  ) +
+  scale_fill_brewer(palette = "Set1")
+  print(boxPlot_age)
+
 ```
 
+
 ```{r desc stat GENDER, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-#General summary statisti
+# Summary statistic
 msmData$gender<-as.factor(msmData$gender)
 descGender <-msmData %>%
   group_by(gender) %>%
@@ -97,11 +111,13 @@ descGender <-msmData %>%
     percentage = round((n()/nrow(msmData))*100,2),
 )
 
-#print table
+# Print table 
 print(descGender)
 ```
 
+
 ```{r desc stat IMD, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+# Summary statistic 
 descDeprivation <- msmData %>%
   group_by(deprivationIndex, gender) %>%
   summarise(
@@ -109,100 +125,193 @@ descDeprivation <- msmData %>%
     percentage = round((n() / nrow(msmData)) * 100, 2),
   )
 
-# print table
+# Print table
 print(descDeprivation)
 
-# chart: IMD, 1=least deprived and 5=most deprived
-ggplot(descDeprivation, aes(x = deprivationIndex, y = percentage, fill = gender)) +
-  geom_bar(stat = "identity") +
-  labs(title = "Distribution of deprivation level (%)", x = "Deprivation level", y = "Percentage (%)") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust=0.5,margin = margin(b = 30))) 
+# Plot IMD, 1=most deprived and 5=least deprived
+# Bar plot
+barPlot_imd <- ggplot(descDeprivation, aes(x = deprivationIndex, y = percentage, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge") +  
+  labs(
+    title = "Deprivation Level",
+    x = "Deprivation Level (1 = most deprived 5 = least deprived)",
+    y = "Percentage (%)",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size=10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t=10)), 
+    axis.title.y = element_text(size = 10),  
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),  
+    axis.text.y = element_text(size = 8) 
+  ) +
+  scale_fill_brewer(palette = "Set1")
+  print(barPlot_imd)
+
+# Box plot  
+boxPlot_imd <- ggplot(msmData, aes(x = factor(deprivationIndex), y = age, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Age Distribution by Deprivation Level and Gender",
+    x = "Deprivation Level (1 = most deprived 5 = least deprived)",
+    y = "Age",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_imd)
+
+
 ```
 
+
 ```{r desc stat ETHNICITY, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+# Summary statistic, 5 ethnic group
 descEthnicity <- msmData %>%
-  group_by(ethnicity = addNA(as.factor(ethnicity))) %>%
+  group_by(ethnicity = addNA(as.factor(ethnicity)), gender) %>%
   summarise(
     count = n(),
     percentage = round((n() / nrow(msmData)) * 100, 2),
 )
-totalCount <- nrow(msmData)
-totalPercentage <- round((totalCount / totalCount) * 100, 2)  
-totalRow <- tibble(
-  ethnicity = "Total",
-  count = totalCount,
-  percentage = totalPercentage
-)
-descEthnicity <- bind_rows(descEthnicity, totalRow)
 
-#print table
+# Print table 
 print(descEthnicity)
 
-#chart: ethnicity
-ggplot(descEthnicity_filtered, aes(x = ethnicity, y = percentage, fill = ethnicity)) +
+#Reorder
+library(forcats)
+
+# Reorder ethnicity by percentage
+# Reorder ethnicity by total percentage across genders
+descEthnicity <- descEthnicity %>%
+  group_by(ethnicity) %>%
+  mutate(total_percentage = sum(percentage)) %>%  # Calculate total percentage
+  ungroup() %>%
+  mutate(ethnicity = fct_reorder(ethnicity, total_percentage, .desc = TRUE))
+
+
+# Plot 
+barPlot_ethnicity <- ggplot(descEthnicity, aes(x = ethnicity, y = percentage, fill = gender)) +
   geom_bar(stat = "identity") +
-  labs(title = "Distribution of ethnicity (%)", x = "Ethnicity", y = "Percentage (%)") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust=0.5,margin = margin(b = 30))) +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  labs(
+    title = "Ethnicity",
+    x = "Ethnicity",
+    y = "Percentage (%)",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+     plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+  print(barPlot_ethnicity)
 ```
 
-```{r desc stat ALCOHOL, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-#Alcohol level
-#Level 0>>>0 unit/week, non-drinker)
-#Level 0>>>up to 14 unit/week, low consumption)
-#Level 0>>>5-35/week, moderate consumption)
-#Level 0>>>>35 unit/week, high consumption)
 
+```{r desc stat ALCOHOL, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+# Summary statistic alcohol level
+# Level 0>>>0 unit/week, non-drinker)
+# Level 1>>>up to 14 unit/week, low consumption)
+# Level 2>>>5-35/week, moderate consumption)
+# Level 3>>>>35 unit/week, high consumption)
+
+# Summarise alcoholStatus by gender
 descAlcohol <- msmData %>%
   group_by(alcoholStatus, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(msmData)) * 100, 2),  
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    .groups = "drop"
   )
 
-#print table
+# Print table
 print(descAlcohol)
 
-#chart: alcohol status
-ggplot(descAlcohol %>% filter(!is.na(alcoholStatus)), aes(x = alcoholStatus, y = percentage, fill = gender)) +
+# Plot 
+barPlot_alcoholstat <- ggplot(descAlcohol %>% filter(!is.na(alcoholStatus)), aes(x = alcoholStatus, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
-  labs(title = "Alcohol Consumption Levels (%)",
-       x = "Alcohol Consumption Level",
-       y = "Percentage (%)") +
-  theme_minimal() +
-  theme(plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-        axis.text.x = element_text(angle = 45, hjust = 1)) 
+  labs(
+    title = "Alcohol Consumption Level",
+    x = "Alcohol Consumption Level",
+    y = "Percentage (%)",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_x_discrete(labels = c(
+    "AlcoholConsumptionLevel0" = "Level 0",
+    "AlcoholConsumptionLevel1" = "Level 1",
+    "AlcoholConsumptionLevel2" = "Level 2",
+    "AlcoholConsumptionLevel3" = "Level 3",
+    "Unknown" = "Unknown"
+  )) +  # Change labels for the x-axis
+  scale_fill_brewer(palette = "Set1")
+
+print(barPlot_alcoholstat)
+
 ```
 
+
 ```{r desc stat SMOKING, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+# Summary statistic : latest smoking status
 descSmoking <- msmData %>%
   group_by(latestSmokingStatus, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(msmData)) * 100, 2)   # Removed the trailing comma
+    percentage = round((n() / nrow(msmData)) * 100, 2)
   )
 
 # Print table
 print(descSmoking)
 
-# Chart: smoking status
-ggplot(descSmoking, aes(x = latestSmokingStatus, y = percentage, fill = gender)) +
+# Plot
+barPlot_smokingstat <- ggplot(descSmoking, aes(x = latestSmokingStatus, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Latest smoking status (%)", 
-    x = "Smoking status", 
-    y = "Percentage (%)"
+    title = "Latest Smoking Status",
+    x = "Smoking Status",
+    y = "Percentage (%)",
+    fill = "Gender"
   ) +
-  theme_minimal() +
+  theme_grey() +
   theme(
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    axis.text.x = element_text(hjust = 0.5)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+print(barPlot_smokingstat)
 ```
 
+
 ```{r desc stat FAMILY HISTORY, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+# Summary statistic family history: diabetes, CVD
 longFH<- msmData %>%
   pivot_longer(cols=c(cvdFH, diabetesFH),
   names_to = "FamilyHistory",
@@ -215,27 +324,43 @@ descFH<-longFH %>%
     percentage = round((n() / nrow(msmData)) * 100, 2)
 )
 
-#print table
+# Print table
 print(descFH)
 
-#only the confirmed FH 
+
+# Only confirmed disease
 descFH_filtered <- descFH %>%
   filter(status == "TRUE")
 
-# chart: family history
-ggplot(descFH_filtered, aes(x = FamilyHistory, y = percentage, fill = gender)) +
-  geom_bar(stat = "identity", position = "dodge") +  
-  labs(title = "Disease family history by gender (%)", 
-       x = "Family History Status", 
-       y = "Percentage (%)") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(hjust = 1),  
-        legend.position = "right",  
-        plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),  
-        plot.margin = margin(b = 30, t = 20, r = 20, l = 20))  
+# Plot
+barPlot_FH <- ggplot(descFH_filtered, aes(x = FamilyHistory, y = percentage, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(
+    title = "Family History",
+    x = "Family History",
+    y = "Percentage (%)",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+print(barPlot_FH)
+
+
 ```
 
-```{r desc stat PREVIOUS DIAGNOSIS STATUS, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+
+```{r desc stat PRESENCE DAIGNOSIS, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+# Summary statistic AF, hyperlipidaemia, hypertension
+
 longPDS<- msmData %>%
   pivot_longer(
     cols=c(atrialFib, hyperlipidaemia, hypertension),
@@ -251,700 +376,865 @@ descPDS <- longPDS %>%
     .groups = 'drop'
   )
 
-#print table
+# Print table
 print(descPDS)
-# only confirmed diagnosis
+
+
+# Only confirmed diagnosis
 descPDS_filtered <- descPDS %>%
   filter(status == "TRUE")
-#chart: previous diagnosi
-ggplot(descPDS, aes(x = previousDiagnosis, y = percentage, fill = gender)) +
+
+# Plot
+barPlot_PDS <-ggplot(descPDS_filtered, aes(x = previousDiagnosis, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +  
-  facet_wrap(~ gender) +  
-  labs(title = "Disease status by gender(%)", 
-       x = "Disease status", 
-       y = "Percentage (%)") +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b =30, t = 20, r = 20, l = 20)
-  )
+  labs(
+    title = "Presence Diagnosis",
+    x = "Condition",
+    y = "Percentage (%)",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+   theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+print(barPlot_PDS)
+
 ```
+
+
+```{r ALL VISUAL NMD, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE, fig.width=16, fig.height=14}
+
+combinedBarPlot_NMD<- barPlot_age + barPlot_imd + barPlot_alcoholstat + barPlot_smokingstat + barPlot_ethnicity + barPlot_FH + barPlot_PDS +
+  plot_layout(ncol = 3) +    
+  plot_annotation(title = "Non-modifiable Risk Factor") 
+
+print(combinedBarPlot_NMD)
+```
+
+
 
 
 #Modifiable risk factors
 ```{r desc stat BMI, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
 set.seed(123)
-dataBMI<- msmData %>%
+
+# Summary statistic 
+# <18.5 (underweight)
+# 18.5- 24.9 (normal weight)
+# 25- 29.9 (moderate)
+# ≥30 (obese)
+
+msmData$bmi <- as.numeric(as.character(msmData$bmi))
+msmData <- msmData %>%
   mutate(
-   numBMI=case_when(
-    bmi== "less.than.18.5"~ "<18.5", #underweight
-    bmi== "18.5.to.25" ~ "18.5-24.9",#normal weight
-    bmi== "25.to.30" ~ "25-29.9",    #moderate
-    bmi== "greater.than.30"~ "≥30",  #obese
-    TRUE ~ bmi
-  ),
- bmiNumeric = case_when(
-    bmi == "less.than.18.5" ~ runif(n(), min = 16, max = 18.4),
-    bmi == "18.5.to.25" ~ runif(n(), min = 18.5, max = 25),
-    bmi == "25.to.30" ~ runif(n(), min = 25, max = 30),
-    bmi == "greater.than.30" ~ runif(n(), min = 30, max = 40),
-    TRUE ~ as.numeric(bmi)
+    bmiCat = cut(
+      bmi,  
+      breaks = c(-Inf, 18.5, 24.9, 29.9, Inf),  
+      labels = c("<18.5", "18.5-24.9", "25-29.9", "≥30"),  
+      right = TRUE  
+    )
   )
-)
-  
-descBMI <- dataBMI %>%
-  group_by(numBMI, gender) %>%
+
+
+# Summary statistic for BMI categories by gender
+descBMI <- msmData %>%
+  group_by(bmiCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataBMI)) * 100, 2),
-    meanBMI = round(mean(bmiNumeric , na.rm = TRUE), 2),
-    medianBMI = round(median(bmiNumeric, na.rm = TRUE), 2),
-    sdBMI = round(sd(bmiNumeric , na.rm = TRUE), 2),
-    Q1_BMI = round(quantile(bmiNumeric, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
-    Q3_BMI = round(quantile(bmiNumeric, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
-    iqrBMI = round(IQR(bmiNumeric, na.rm = TRUE), 2),              # Interquartile Range (IQR)
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanBMI = round(mean(bmi, na.rm = TRUE), 2),
+    medianBMI = round(median(bmi, na.rm = TRUE), 2),
+    sdBMI = round(sd(bmi, na.rm = TRUE), 2),
+    Q1_BMI = round(quantile(bmi, 0.25, na.rm = TRUE), 2),   
+    Q3_BMI = round(quantile(bmi, 0.75, na.rm = TRUE), 2),   
+    iqrBMI = round(IQR(bmi, na.rm = TRUE), 2), 
+    minBMI = round(min(bmi, na.rm = TRUE), 2),  
+    maxBMI = round(max(bmi, na.rm = TRUE), 2), 
     .groups = 'drop'
   )
 
-overallBMI <- dataBMI %>%
-  summarise(
-    numBMI = "Overall",             
-    gender = "All",                  
-    count = n(),
-    percentage = 100,               
-    meanBMI = round(mean(bmiNumeric , na.rm = TRUE), 2),
-    medianBMI = round(median(bmiNumeric, na.rm = TRUE), 2),
-    sdBMI = round(sd(bmiNumeric, na.rm = TRUE), 2),
-    Q1_BMI = round(quantile(bmiNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_BMI = round(quantile(bmiNumeric, 0.75, na.rm = TRUE), 2),
-    iqrBMI = round(IQR(bmiNumeric, na.rm = TRUE), 2)
-  )
-descBMI <- bind_rows(descBMI, overallBMI)
-
-#print table
+# Print table
 print(descBMI)
 
-#chart: BMI
-# Set the correct order for BMI categories
-descBMI_filtered <- descBMI %>%
-  filter(numBMI != "Overall") %>%
-  mutate(numBMI = factor(numBMI, levels = c("<18.5", "18.5-24.9", "25-29.9", "≥30")))
-
-# Plot with the ordered BMI categories
-ggplot(descBMI_filtered, aes(x = numBMI, y = percentage, fill = gender)) +
-  geom_bar(stat = "identity", position = "dodge") +
+# Bar plot for BMI categories by gender
+barPlot_bmi <- ggplot(descBMI, aes(x = bmiCat, y = percentage, fill = gender)) +
+  geom_bar(stat = "identity", position = "dodge") +  
   labs(
-    title = "BMI Categories by gender (%)",
-    x = "BMI Category (kg/m2)",
+    title = "Body Mass Index (BMI)",
+    x = "BMI Category (kg/m²)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+  theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8), 
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+print(barPlot_bmi)
+
+# Box plot 
+# Box plot for BMI distribution by gender and category
+boxPlot_bmi <- ggplot(msmData, aes(x = gender, y = bmi, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Body Mass Index (BMI)",
+    x = "Gender",
+    y = "BMI Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_bmi)
+
 ```
 
 ```{r desc stat HDL, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+
+# HDL level : 
+# low >>> higher risk of CMD
+# borderline >>> adequate
+# high >>> protective
+
 set.seed(123)
-dataHDL <- msmData %>%
-  mutate(
-    numHDL = case_when(
-      hdl == "less.than.1.03" ~ "<1.03",     #low >>> higher risk of CMD
-      hdl == "1.03.to.1.55" ~ "1.03-1.54",   #borderline >>> adequate
-      hdl == "greater.than.1.55" ~ "≥1.55",  #high >>> protective
-      TRUE ~ hdl
-    ),
-    # Generate uniform values within each HDL range
-    hdlNumeric = case_when(
-      hdl == "less.than.1.03" ~ runif(n(), min = 0.8, max = 1.03),
-      hdl == "1.03.to.1.55" ~ runif(n(), min = 1.03, max = 1.54),
-      hdl == "greater.than.1.55" ~ runif(n(), min = 1.55, max = 2.2),
-      TRUE ~ as.numeric(hdl)
+
+msmData$hdl <-as.numeric(as.character(msmData$hdl))
+  msmData <-msmData %>%
+    mutate(
+      hdlCat = cut(
+        hdl,
+        breaks = c(-Inf, 1.03, 1.54, Inf),
+        labels = c("<1.03", "1.03-1.54", "≥1.55"),
+        right = TRUE
+      )
     )
-  )
-descHDL <- dataHDL %>%
-  group_by(numHDL, gender) %>%
+      
+descHDL <- msmData %>%
+  group_by(hdlCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataHDL)) * 100, 2),
-    meanHDL = round(mean(hdlNumeric, na.rm = TRUE), 2),
-    medianHDL = round(median(hdlNumeric, na.rm = TRUE), 2),
-    sdHDL = round(sd(hdlNumeric, na.rm = TRUE), 2),
-    Q1_HDL = round(quantile(hdlNumeric, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
-    Q3_HDL = round(quantile(hdlNumeric, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
-    iqrHDL = round(IQR(hdlNumeric, na.rm = TRUE), 2),              # Interquartile Range (IQR)
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanHDL = round(mean(hdl, na.rm = TRUE), 2),
+    medianHDL = round(median(hdl, na.rm = TRUE), 2),
+    sdHDL = round(sd(hdl, na.rm = TRUE), 2),
+    Q1_HDL = round(quantile(hdl, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
+    Q3_HDL = round(quantile(hdl, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
+    iqrHDL = round(IQR(hdl, na.rm = TRUE), 2),              # Interquartile Range (IQR)
+    minHDL = round(min(hdl, na.rm = TRUE), 2),
+    maxHDL = round(max(hdl, na.rm = TRUE), 2),
     .groups = 'drop'
   )
-overallHDL <- dataHDL %>%
-  summarise(
-    numHDL = "Overall",             
-    gender = "All",                  
-    count = n(),
-    percentage = 100,               
-    meanHDL = round(mean(hdlNumeric  , na.rm = TRUE), 2),
-    medianHDL = round(median(hdlNumeric , na.rm = TRUE), 2),
-    sdHDL = round(sd(hdlNumeric , na.rm = TRUE), 2),
-    Q1_HDL = round(quantile(hdlNumeric,0.25, na.rm = TRUE), 2),
-    Q3_HDL = round(quantile(hdlNumeric,0.75, na.rm = TRUE), 2),
-    iqrHDL = round(IQR(hdlNumeric , na.rm = TRUE), 2)
-  )
 
-descHDL <- bind_rows(descHDL, overallHDL)
 
 # Print table
 print(descHDL)
 
-#chart: HDL
-descHDL_filtered <- descHDL %>%
-  filter(numHDL != "Overall") %>%
-  mutate(numHDL = factor(numHDL, levels = c("<1.03", "1.03-1.54", "≥1.55")))
-
-ggplot(descHDL_filtered, aes(x = numHDL, y = percentage, fill = gender)) +
+# Bar plot
+barPlot_hdl <- ggplot(descHDL, aes(x = hdlCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "HDL Categories by gender (%)",
+    title = "High-density lipoprotein (HDL) cholesterol",
     x = "HDL level (mmol/l)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_hdl)
+
+#Box plot
+boxPlot_hdl <- ggplot(msmData, aes(x = hdlCat, y = hdl, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "High-density lipoprotein (HDL) cholesterol",
+    x = "HDL Category (mmol/l)",
+    y = "HDL Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, "bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_hdl)
+
 ```
 
 ```{r desc stat LDL, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-set.seed(123)
-dataLDL<- msmData %>%
-  mutate(numLDL=case_when(
-    ldl== "less.than.2.6"~ "<2.6",     #optimal/low-risk >>> low-risk level
-    ldl== "2.6.to.3.4" ~ "2.6-3.3",    #above optimal >>> slightly increased
-    ldl== "3.4.to.4.0" ~ "3.4-3.9",    #borderline high >>> moderate
-    ldl== "4.0.to.4.9" ~ "4.0-4.9",    #high >>> high
-    ldl== "greater.than.4.9" ~ "≥4.9", #very high >>> significant
-    TRUE ~ ldl
-  ),
-  ldlNumeric=case_when(
-    ldl== "less.than.2.6"~ runif(n(), min=2.0, max=2.59), 
-    ldl== "2.6.to.3.4" ~ runif(n(), min=2.6, max=3.39),
-    ldl== "3.4.to.4.0" ~ runif(n(), min=3.4, max=3.99),
-    ldl== "4.0.to.4.9" ~ runif(n(), min=4.0, max=4.9),
-    ldl== "greater.than.4.9" ~ runif(n(), min=4.9, max=5.5),
-    TRUE ~ as.numeric(ldl)
-  )
-)
 
-descLDL <- dataLDL %>%
-  group_by(numLDL, gender) %>%
+# LDL category
+# <2.6 >>> Low risk
+# 2.6-3.3 >>> Borderline risk
+# 3.4-3.9 >>> Moderate
+# 4.0-4.9 >>> High risk
+# ≥ 5.0 >>> very high risk
+
+set.seed(123)
+
+
+msmData$ldl <-as.numeric(as.character(msmData$ldl))
+  msmData <-msmData %>%
+    mutate(
+      ldlCat = cut(
+        ldl,
+        breaks = c(-Inf, 2.6, 3.3, 3.9, 4.9, 5.0, Inf),
+        labels = c("<2.6", "2.6-3.3", "3.4-3.9", "4.0-4.9", "4.0-4.9", "≥5.0"),
+        right = TRUE
+      )
+    )
+  
+descLDL <- msmData %>%
+  group_by(ldlCat, gender) %>%
   summarise(
     count = n(),
     percentage = round((n() / nrow(msmData)) * 100, 2),
-    meanLDL = round(mean(ldlNumeric, na.rm = TRUE), 2),
-    medianLDL = round(median(ldlNumeric, na.rm = TRUE), 2),
-    sdLDL = round(sd(ldlNumeric, na.rm = TRUE), 2),
-    Q1_LDL = round(quantile(ldlNumeric, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
-    Q3_LDL = round(quantile(ldlNumeric, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
-    iqrLDL = round(IQR(ldlNumeric, na.rm = TRUE), 2),    
+    meanLDL = round(mean(ldl, na.rm = TRUE), 2),
+    medianLDL = round(median(ldl, na.rm = TRUE), 2),
+    sdLDL = round(sd(ldl, na.rm = TRUE), 2),
+    Q1_LDL = round(quantile(ldl, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
+    Q3_LDL = round(quantile(ldl, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
+    iqrLDL = round(IQR(ldl, na.rm = TRUE), 2),              # Interquartile Range (IQR)
+    minLDL = round(min(ldl, na.rm = TRUE), 2),
+    maxLDL = round(max(ldl, na.rm = TRUE), 2),
     .groups = 'drop'
   )
-overallLDL <- dataLDL %>%
-  summarise(
-    numLDL = "Overall",             
-    gender = "All",                  
-    count = n(),
-    percentage = 100,               
-    meanLDL = round(mean(ldlNumeric  , na.rm = TRUE), 2),
-    medianLDL = round(median(ldlNumeric, na.rm = TRUE), 2),
-    sdLDL = round(sd(ldlNumeric , na.rm = TRUE), 2),
-    Q1_LDL = round(quantile(ldlNumeric,0.25, na.rm = TRUE), 2),
-    Q3_LDL = round(quantile(ldlNumeric,0.75, na.rm = TRUE), 2),
-    iqrLDL = round(IQR(ldlNumeric , na.rm = TRUE), 2)
-  )
-
-descLDL <- bind_rows(descLDL, overallLDL)
 
 # Print table
 print(descLDL)
 
-#chart: LDL
-descLDL_filtered <- descLDL %>%
-  filter(numLDL != "Overall") %>%
-  mutate(numLDL = factor(numLDL, levels = c("<2.6", "2.6-3.3", "3.4-3.9", "4.0-4.9","≥4.9")))
-
-ggplot(descLDL_filtered, aes(x = numLDL, y = percentage, fill = gender)) +
+# Bar plot
+barPlot_ldl <- ggplot(descLDL, aes(x = ldlCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "LDL Categories by gender (%)",
+    title = "Low-density lipoprotein (LDP) cholesterol",
     x = "LDL level (mmol/l)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face = "bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_ldl)
+
+#Box plot
+boxPlot_ldl <- ggplot(msmData, aes(x = ldlCat, y = ldl, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Low-density lipoprotein (LDP) cholesterol",
+    x = "LDL Category (mmol/l)",
+    y = "LDL Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold" ),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_ldl)
+
 ```
 
 ```{r desc stat SBP, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+
+# SBP level
+# <120 >>> normal
+# 120-140 >>> elevated 
+# ≥140 >>> hypertension
+
 set.seed(123)
-dataSBP<- msmData %>%
-  mutate(
-   numSBP=case_when(
-    sbp== "less.than.120"~ "<120",       #normal
-    sbp== "120.to.140" ~ "120-140",      #elevated
-    sbp== "greater.than.140" ~ "≥140",    #hypertension
-    TRUE ~ sbp
-  ),
- sbpNumeric = case_when(
-    sbp == "less.than.120" ~ runif(n(), min =70, max = 120),
-    sbp == "120.to.140" ~ runif(n(), min = 120, max = 140),
-    sbp == "greater.than.140" ~ runif(n(), min = 140, max = 180),
-    TRUE ~ as.numeric(sbp)
-  )
-)
+
+
+msmData$sbp <-as.numeric(as.character(msmData$sbp))
+  msmData <-msmData %>%
+    mutate(
+      sbpCat = cut(
+        sbp,
+        breaks = c(-Inf, 120, 140, Inf),
+        labels = c("<120", "120-139", "≥140"),
+        right = TRUE
+      )
+    )
   
-descSBP <- dataSBP %>%
-  group_by(numSBP, gender) %>%
+descSBP <- msmData %>%
+  group_by(sbpCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataBMI)) * 100, 2),
-    meanSBP = round(mean( sbpNumeric , na.rm = TRUE), 2),
-    medianSBP = round(median(sbpNumeric, na.rm = TRUE), 2),
-    sdSBP = round(sd(sbpNumeric , na.rm = TRUE), 2),
-    Q1_SBP = round(quantile(sbpNumeric, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
-    Q3_SBP = round(quantile(sbpNumeric, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
-    iqrSBP = round(IQR(sbpNumeric, na.rm = TRUE), 2), 
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanSBP = round(mean(sbp, na.rm = TRUE), 2),
+    medianSBP = round(median(sbp, na.rm = TRUE), 2),
+    sdSBP = round(sd(sbp, na.rm = TRUE), 2),
+    Q1_SBP = round(quantile(sbp, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
+    Q3_SBP = round(quantile(sbp, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
+    iqrSBP = round(IQR(sbp, na.rm = TRUE), 2),              # Interquartile Range (IQR)
     .groups = 'drop'
   )
 
-overallSBP <- dataSBP %>%
-  summarise(
-    numSBP = "Overall",             
-    gender = "All",                  
-    count = n(),
-    percentage = 100,               
-    meanSBP = round(mean(sbpNumeric , na.rm = TRUE), 2),
-    medianSBP = round(median(sbpNumeric, na.rm = TRUE), 2),
-    sdSBP = round(sd(sbpNumeric, na.rm = TRUE), 2),
-    Q1_SBP = round(quantile(sbpNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_SBP = round(quantile(sbpNumeric, 0.75, na.rm = TRUE), 2),   
-    iqrSBP = round(IQR(sbpNumeric, na.rm = TRUE), 2),  
-  )
-descSBP <- bind_rows(descSBP, overallSBP)
-
-#print table
+# Print table
 print(descSBP)
 
-#chart: SBP
-descSBP_filtered <- descSBP %>%
-  filter(numSBP != "Overall") %>%
-  mutate(numSBP = factor(numSBP, levels = c("<120", "120-140", "≥140")))
-
-ggplot(descSBP_filtered, aes(x = numSBP, y = percentage, fill = gender)) +
+# Bar plot
+barPlot_sbp <- ggplot(descSBP, aes(x = sbpCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "SBP level by gender (%)",
+    title = "Systolic Blood Pressure (SBP)",
     x = "SBP level (mmHg)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_sbp)
+
+#Box plot
+boxPlot_sbp <- ggplot(msmData, aes(x = sbpCat, y = sbp, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Systolic Blood Pressure (SBP)",
+    x = "SBP Category (mmHg)",
+    y = "SBP Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_sbp)
+
 ```
 
 ```{r desc stat DBP, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+
+# DBP level
+# <80 >>> normal
+# 80-90 >>> elevated
+# ≥90 >>> hypertension
+
 set.seed(123)
-dataDBP<- msmData %>%
-  mutate(
-   numDBP=case_when(
-    dbp== "less.than.80"~ "<80",       #normal
-    dbp== "80.to.90" ~ "80-90",        #elevated
-    dbp== "greater.than.90" ~ "≥90",   #hypertension
-    TRUE ~ dbp
-  ),
- dbpNumeric = case_when(
-    dbp == "less.than.80" ~ runif(n(), min = 60, max = 80),
-    dbp == "80.to.90" ~ runif(n(), min = 80, max = 90),
-    dbp == "greater.than.90" ~ runif(n(), min = 90, max = 120),
-    TRUE ~ as.numeric(dbp)
-  )
-)
+
+msmData$dbp <-as.numeric(as.character(msmData$dbp))
+  msmData <-msmData %>%
+    mutate(
+      dbpCat = cut(
+        dbp,
+        breaks = c(-Inf, 80, 90, Inf),
+        labels = c("80", "80-90", "≥90"),
+        right = TRUE
+      )
+    )
   
-descDBP <- dataDBP %>%
-  group_by(numDBP, gender) %>%
+descDBP <- msmData %>%
+  group_by(dbpCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataDBP)) * 100, 2),
-    meanDBP = round(mean( dbpNumeric , na.rm = TRUE), 2),
-    medianDBP = round(median(dbpNumeric, na.rm = TRUE), 2),
-    sdDBP = round(sd(dbpNumeric , na.rm = TRUE), 2),
-    Q1_DBP = round(quantile(dbpNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_DBP = round(quantile(dbpNumeric, 0.75, na.rm = TRUE), 2),   
-    iqrDBP = round(IQR(dbpNumeric, na.rm = TRUE), 2), 
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanDBP = round(mean(dbp, na.rm = TRUE), 2),
+    medianDBP= round(median(dbp, na.rm = TRUE), 2),
+    sdDBP = round(sd(dbp, na.rm = TRUE), 2),
+    Q1_DBP = round(quantile(dbp, 0.25, na.rm = TRUE), 2),   # First quartile (Q1)
+    Q3_DBP = round(quantile(dbp, 0.75, na.rm = TRUE), 2),   # Third quartile (Q3)
+    iqrDBP = round(IQR(dbp, na.rm = TRUE), 2),              # Interquartile Range (IQR)
+    minDBP = round(min(dbp, na.rm = TRUE), 2),
+    maxDBP = round(max(dbp, na.rm = TRUE),2),
     .groups = 'drop'
   )
 
-overallDBP <- dataDBP %>%
-  summarise(
-    numDBP = "Overall",             
-    gender = "All",                  
-    count = n(),
-    percentage = 100,               
-    meanDBP = round(mean(dbpNumeric , na.rm = TRUE), 2),
-    medianDBP = round(median(dbpNumeric, na.rm = TRUE), 2),
-    sdDBP = round(sd(dbpNumeric, na.rm = TRUE), 2),
-    Q1_DBP = round(quantile(dbpNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_DBP = round(quantile(dbpNumeric, 0.75, na.rm = TRUE), 2),   
-    iqrDBP = round(IQR(dbpNumeric, na.rm = TRUE), 2), 
-  )
-descDBP <- bind_rows(descDBP, overallDBP)
-
-#print table
+# Print table
 print(descDBP)
 
-#chart: SBP
-descDBP_filtered <- descDBP %>%
-  filter(numDBP != "Overall") %>%
-  mutate(numDBP = factor(numDBP, levels = c("<80", "80-90", "≥90")))
-
-ggplot(descDBP_filtered, aes(x = numDBP, y = percentage, fill = gender)) +
+# Bar plot
+barPlot_dbp <- ggplot(descDBP, aes(x = dbpCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "DBP categories by gender (%)",
+    title = "Diastolic Blood Pressure (DBP)",
     x = "DBP level (mmHg)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_dbp)
+
+#Box plot
+boxPlot_dbp <- ggplot(msmData, aes(x = gender, y = dbp, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Diastolic Blood Pressure (DBP)",
+    x = "DBP level (mmHg)",
+    y = "DBP Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_dbp)
+
+
 ```
 
 ```{r desc stat TRIGLYCERIDES, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
+
+# Triglycerides level
+# < 1.7 >>> low-risk
+# 1.7-2.2 >>> borderline high
+# 2.3-5.6 >>> high
+# ≥5.6 >>> very high
+
 set.seed(123)
-dataTriglycerides<- msmData %>%
-  mutate(
-   numTriglycerides=case_when(
-    triglycerides== "less.than.1.7"~ "<1.7",       #low risk
-    triglycerides== "1.7.to.2.3" ~ "1.7-2.2",      #borderline high
-    triglycerides== "2.3.to.5.6" ~ "2.3-5.6",      #high
-    triglycerides== "greater.than.5.6" ~ "≥5.6",   #very high
-    TRUE ~ triglycerides
-  ),
-triglyceridesNumeric = case_when(
-    triglycerides == "less.than.1.7" ~ runif(n(), min = 1.5, max = 1.69),
-    triglycerides== "1.7.to.2.3" ~ runif(n(), min = 1.7, max = 2.3),
-    triglycerides== "2.3.to.5.6"~ runif(n(), min = 2.3, max =5.6),
-    triglycerides== "greater.than.5.6" ~ runif(n(), min = 5.6, max = 8),
-    TRUE ~ as.numeric(triglycerides)
-  )
-)
+
+msmData$triglycerides <-as.numeric(as.character(msmData$triglycerides))
+  msmData <-msmData %>%
+    mutate(
+    triglyceridesCat = cut(
+       triglycerides,
+        breaks = c(-Inf, 1.7, 2.2, 5.6, Inf),
+        labels = c("<1.7", "1.7-2.2", "2.2-5.6", "≥5.6"),
+        right = TRUE
+      )
+    )
   
-descTriglycerides<- dataTriglycerides %>%
-  group_by(numTriglycerides, gender) %>%
+  
+descTriglycerides<- msmData %>%
+  group_by(triglyceridesCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataTriglycerides)) * 100, 2),
-    meanTriglycerides = round(mean(triglyceridesNumeric , na.rm = TRUE), 2),
-    medianTriglycerides = round(median(triglyceridesNumeric, na.rm = TRUE), 2),
-    sdTriglycerides= round(sd(triglyceridesNumeric , na.rm = TRUE), 2),
-    Q1_Triglycerides = round(quantile(triglyceridesNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Triglycerides = round(quantile(triglyceridesNumeric, 0.75, na.rm = TRUE), 2),   
-    iqrTriglycerides = round(IQR(triglyceridesNumeric, na.rm = TRUE), 2), 
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanTriglycerides = round(mean(triglycerides, na.rm = TRUE), 2),
+    medianTriglycerides = round(median(triglycerides, na.rm = TRUE), 2),
+    sdTriglycerides= round(sd(triglycerides , na.rm = TRUE), 2),
+    Q1_Triglycerides = round(quantile(triglycerides, 0.25, na.rm = TRUE), 2),
+    Q3_Triglycerides = round(quantile(triglycerides, 0.75, na.rm = TRUE), 2),   
+    iqrTriglycerides = round(IQR(triglycerides, na.rm = TRUE), 2), 
+    minTriglycerides = round(min(triglycerides, na.rm = TRUE), 2), 
+    maxTriglycerides = round(max(triglycerides, na.rm = TRUE), 2), 
     .groups = 'drop'
   )
 
-overallTriglycerides<- dataTriglycerides %>%
-  summarise(
-    numTriglycerides= "Overall",             
-    gender = "All",                  
-    count = n(),
-    percentage = 100,               
-    meanTriglycerides = round(mean(triglyceridesNumeric , na.rm = TRUE), 2),
-    medianTriglycerides = round(median(triglyceridesNumeric, na.rm = TRUE), 2),
-    sdTriglycerides = round(sd(triglyceridesNumeric, na.rm = TRUE), 2),
-    Q1_Triglycerides = round(quantile(triglyceridesNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Triglycerides = round(quantile(triglyceridesNumeric, 0.75, na.rm = TRUE), 2),   
-    iqrTriglycerides = round(IQR(triglyceridesNumeric, na.rm = TRUE), 2), 
-  )
-descTriglycerides <- bind_rows(descTriglycerides, overallTriglycerides)
 
-#print table
+# Print table
 print(descTriglycerides)
 
-#chart: SBP
-descTriglycerides_filtered <- descTriglycerides %>%
-  filter(numTriglycerides != "Overall") %>%
-  mutate(numTriglycerides = factor(numTriglycerides, levels = c("<1.7", "1.7-2.2", "2.3-5.6","≥5.6")))
-
-ggplot(descTriglycerides_filtered, aes(x = numTriglycerides, y = percentage, fill = gender)) +
+# Bar plot
+barPlot_triglycerides<- ggplot(descTriglycerides, aes(x = triglyceridesCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Triglycerides categories by gender (%)",
+    title = "Triglycerides",
     x = "Triglycerides level (mmol/l)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_triglycerides)
+
+#Box plot
+boxPlot_triglycerides <- ggplot(msmData, aes(x = gender, y = dbp, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Triglycerides",
+    x = "Triglycerides level (mmol/l)",
+    y = "Triglycerides Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_triglycerides)
+  
 ```
 
 ```{r desc stat TOTAL CHOLESTEROL, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-set.seed(123)
-dataCholesterol <- msmData %>%
-  mutate(
-    numCholesterol = case_when(
-      cholesterol == "less.than.5.0" ~ "<5.0",         # Low risk
-      cholesterol == "5.0.to.5.5" ~ "5.0-5.5",         # Borderline high
-      cholesterol == "5.5.to.6.0" ~ "5.6-6.0",         # High
-      cholesterol == "greater.than.6.0" ~ "≥6.0",      # Very high
-      TRUE ~ cholesterol
-    ),
-    cholesterolNumeric = case_when(
-      cholesterol == "less.than.5.0" ~ runif(n(), min = 4, max = 5),
-      cholesterol == "5.0.to.5.5" ~ runif(n(), min = 5, max = 5.5),
-      cholesterol == "5.5.to.6.0" ~ runif(n(), min = 5.6, max = 6),
-      cholesterol == "greater.than.6.0" ~ runif(n(), min = 6, max = 8),
-      TRUE ~ as.numeric(cholesterol)
-    )
-  )
 
-descCholesterol <- dataCholesterol %>%
-  group_by(numCholesterol, gender) %>%
+# Total cholesterol level
+
+# <5.0 >>>      Low-risk
+# 5.0-5.5 >>>   Borderline high
+# 5.6-6.0 >>>   High
+# ≥6.0 >>>      Very high
+
+
+set.seed(123)
+
+msmData$cholesterol <-as.numeric(as.character(msmData$cholesterol))
+  msmData <-msmData %>%
+    mutate(
+   cholesterolCat = cut(
+       cholesterol,
+        breaks = c(-Inf, 5.0, 5.5, 6.0, Inf),
+        labels = c("<5.0", "5.0-5.5", "5.6-6.0", "≥6.0 "),
+        right = TRUE
+      )
+    )
+
+descCholesterol <- msmData %>%
+  group_by(cholesterolCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataCholesterol)) * 100, 2),
-    meanCholesterol = round(mean(cholesterolNumeric, na.rm = TRUE), 2),
-    medianCholesterol = round(median(cholesterolNumeric, na.rm = TRUE), 2),
-    sdCholesterol = round(sd(cholesterolNumeric, na.rm = TRUE), 2),
-    Q1_Cholesterol = round(quantile(cholesterolNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Cholesterol = round(quantile(cholesterolNumeric, 0.75, na.rm = TRUE), 2),
-    iqrCholesterol = round(IQR(cholesterolNumeric, na.rm = TRUE), 2),
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanCholesterol = round(mean(cholesterol, na.rm = TRUE), 2),
+    medianCholesterol = round(median(cholesterol, na.rm = TRUE), 2),
+    sdCholesterol = round(sd(cholesterol, na.rm = TRUE), 2),
+    Q1_Cholesterol = round(quantile(cholesterol, 0.25, na.rm = TRUE), 2),
+    Q3_Cholesterol = round(quantile(cholesterol, 0.75, na.rm = TRUE), 2),
+    iqrCholesterol = round(IQR(cholesterol, na.rm = TRUE), 2),
+    minCholesterol = round(min(cholesterol, na.rm = TRUE), 2),
+    maxCholesterol = round(max(cholesterol, na.rm = TRUE), 2),
     .groups = 'drop'
   )
 
-overallCholesterol <- dataCholesterol %>%
-  summarise(
-    numCholesterol = "Overall",             
-    gender = "All",                   
-    count = n(),
-    percentage = 100,                
-    meanCholesterol = round(mean(cholesterolNumeric, na.rm = TRUE), 2),
-    medianCholesterol = round(median(cholesterolNumeric, na.rm = TRUE), 2),
-    sdCholesterol = round(sd(cholesterolNumeric, na.rm = TRUE), 2),
-    Q1_Cholesterol = round(quantile(cholesterolNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Cholesterol = round(quantile(cholesterolNumeric, 0.75, na.rm = TRUE), 2),
-    iqrCholesterol = round(IQR(cholesterolNumeric, na.rm = TRUE), 2)
-  )
-
-descCholesterol <- bind_rows(descCholesterol, overallCholesterol)
 
 # Print table
 print(descCholesterol)
 
-# Prepare filtered data for plotting
-numCholesterol_filtered <- descCholesterol %>%
-  filter(numCholesterol != "Overall") %>%
-  mutate(numCholesterol = factor(numCholesterol, levels = c("<5.0", "5.0-5.5", "5.6-6.0", "≥6.0")))
 
 # Plot cholesterol levels by gender
-ggplot(numCholesterol_filtered, aes(x = numCholesterol, y = percentage, fill = gender)) +
+# Bar plot
+barPlot_cholesterol<- ggplot(descCholesterol, aes(x = cholesterolCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Cholesterol Categories by Gender (%)",
-    x = "Cholesterol Level (mmol/L)",
+    title = " Total Cholesterol",
+    x = "Cholesterol level (mmol/l)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_cholesterol)
+
+#Box plot
+boxPlot_cholesterol <- ggplot(msmData, aes(x = gender, y = cholesterol, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Total Cholesterol",
+    x = "Cholesterol level (mmol/l)",
+    y = "Triglycerides Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_cholesterol)
 
 ```
 
 ```{r desc stat BLOOD GLUCOSE , echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-set.seed(123)
-dataGlucose <- msmData %>%
-  mutate(
-    numGlucose = case_when(
-      glucose == "less.than.5.5" ~ "<5.0",         #normal
-      glucose == "5.5.to.7.0" ~ "5.0-7",           #prediabetes
-      glucose == "greater.than.7.0" ~ "≥7.0",      #diabetes
-      TRUE ~ glucose
-    ),
-   glucoseNumeric = case_when(
-      glucose == "less.than.5.5" ~ runif(n(), min = 4, max = 5.5),
-      glucose == "5.5.to.7.0"~ runif(n(), min = 5.5, max = 7.0),
-      glucose == "greater.than.7.0" ~ runif(n(), min =7.0 , max = 9),
-      TRUE ~ as.numeric(glucose)
-    )
-  )
 
-descGlucose <- dataGlucose %>%
-  group_by(numGlucose, gender) %>%
+# Blood Glucose Level
+
+# <5.0 >>> Normal
+# 5.0-7.0 >>> Pre-diabetes
+# ≥7.0 >>> Diabetes
+
+set.seed(123)
+
+msmData$glucose <-as.numeric(as.character(msmData$glucose))
+  msmData <-msmData %>%
+    mutate(
+   glucoseCat = cut(
+        glucose,
+        breaks = c(-Inf, 5.0, 7.0, Inf),
+        labels = c("<5.0", "5.0-7.0", "≥7.0 "),
+        right = TRUE
+      )
+    )
+
+descGlucose <- msmData %>%
+  group_by(glucoseCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataGlucose)) * 100, 2),
-    meanGlucose = round(mean(glucoseNumeric, na.rm = TRUE), 2),
-    medianGlucose = round(median(glucoseNumeric, na.rm = TRUE), 2),
-    sdGlucose = round(sd(glucoseNumeric, na.rm = TRUE), 2),
-    Q1_Glucose = round(quantile(glucoseNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Glucose= round(quantile(glucoseNumeric, 0.75, na.rm = TRUE), 2),
-    iqrGlucose = round(IQR(glucoseNumeric, na.rm = TRUE), 2),
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanGlucose = round(mean(glucose, na.rm = TRUE), 2),
+    medianGlucose = round(median(glucose, na.rm = TRUE), 2),
+    sdGlucose = round(sd(glucose, na.rm = TRUE), 2),
+    Q1_Glucose = round(quantile(glucose, 0.25, na.rm = TRUE), 2),
+    Q3_Glucose= round(quantile(glucose, 0.75, na.rm = TRUE), 2),
+    iqrGlucose = round(IQR(glucose, na.rm = TRUE), 2),
+    minGlucose= round(min(glucose, 0.75, na.rm = TRUE), 2),
+    maxGlucose = round(max(glucose, na.rm = TRUE), 2),
     .groups = 'drop'
   )
 
-overallGlucose <- dataGlucose %>%
-  summarise(
-    numGlucose = "Overall",             
-    gender = "All",                   
-    count = n(),
-    percentage = 100,                
-    meanGlucose= round(mean(glucoseNumeric, na.rm = TRUE), 2),
-    medianGlucose = round(median(glucoseNumeric, na.rm = TRUE), 2),
-    sdGlucose= round(sd(glucoseNumeric, na.rm = TRUE), 2),
-    Q1_Glucose= round(quantile(glucoseNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Glucose = round(quantile(glucoseNumeric, 0.75, na.rm = TRUE), 2),
-    iqrGlucose = round(IQR(glucoseNumeric, na.rm = TRUE), 2)
-  )
 
-descGlucose <- bind_rows(descGlucose, overallGlucose)
-
-# print table
+# Print table
 print(descGlucose)
 
-#prepare for plotting
-numGlucose_filtered <- descGlucose %>%
-  filter(numGlucose != "Overall") %>%
-  mutate(numGlucose = factor(numGlucose, levels = c("<5.0", "5.0-7", "≥7.0")))
-
-# chart: blood glucose
-ggplot(numCholesterol_filtered, aes(x = numCholesterol, y = percentage, fill = gender)) +
+# Plot Blood Glucose Level
+# Bar plot
+barPlot_glucose<- ggplot(descGlucose, aes(x = glucoseCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Blood glucose Categories by Gender (%)",
-    x = "Blood glucose level (mmol/L)",
+    title = "Blood Glucose",
+    x = "Blood Glucose Level (mmol/l)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_glucose)
+
+#Box plot
+boxPlot_glucose <- ggplot(msmData, aes(x = gender, y = glucose, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Blood Glucose",
+    x = "Blood Glucose Level (mmol/l)",
+    y = "Blood Glucose Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_glucose)
 
 ```
 
 ```{r desc stat HBA1C , echo=FALSE, message=FALSE, warning=FALSE, include=TRUE}
-set.seed(123)
-dataHba1c<- msmData %>%
-  mutate(
-    numHba1c = case_when(
-      hba1c == "less.than.42" ~ "<42",         #normal
-      hba1c == "42.to.48" ~ "42-48",           #prediabetes
-      hba1c  == "greater.than.48" ~ "≥48",      #diabetes
-      TRUE ~ hba1c
-    ),
-   hba1cNumeric = case_when(
-      hba1c  == "less.than.42"~ runif(n(), min = 36, max = 42),
-      hba1c  == "42.to.48"~ runif(n(), min = 42, max = 48),
-      hba1c == "greater.than.48" ~ runif(n(), min =48 , max = 54),
-      TRUE ~ as.numeric(hba1c)
-    )
-  )
 
-descHba1c  <- dataHba1c %>%
-  group_by(numHba1c, gender) %>%
+# HbA1c Level
+#  <42  >>> Normal
+# 42-48 >>> Prediabetes           
+# ≥48  >>> Diabetes
+  
+
+set.seed(123)
+
+msmData$hba1c <-as.numeric(as.character(msmData$hba1c))
+  msmData <-msmData %>%
+    mutate(
+   hba1cCat = cut(
+        hba1c,
+        breaks = c(-Inf, 42, 48, Inf),
+        labels = c("<42", "42-48", "≥48 "),
+        right = TRUE
+      )
+    )
+
+descHba1c  <- msmData %>%
+  group_by(hba1cCat, gender) %>%
   summarise(
     count = n(),
-    percentage = round((n() / nrow(dataHba1c)) * 100, 2),
-    meanHba1c= round(mean(hba1cNumeric, na.rm = TRUE), 2),
-    medianHba1c = round(median(hba1cNumeric, na.rm = TRUE), 2),
-    sdHba1c= round(sd(hba1cNumeric, na.rm = TRUE), 2),
-    Q1_Hba1c = round(quantile(hba1cNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Hba1c= round(quantile(hba1cNumeric, 0.75, na.rm = TRUE), 2),
-    iqrHba1c= round(IQR(hba1cNumeric, na.rm = TRUE), 2),
+    percentage = round((n() / nrow(msmData)) * 100, 2),
+    meanHba1c= round(mean(hba1c, na.rm = TRUE), 2),
+    medianHba1c = round(median(hba1c, na.rm = TRUE), 2),
+    sdHba1c= round(sd(hba1c, na.rm = TRUE), 2),
+    Q1_Hba1c = round(quantile(hba1c, 0.25, na.rm = TRUE), 2),
+    Q3_Hba1c= round(quantile(hba1c, 0.75, na.rm = TRUE), 2),
+    iqrHba1c= round(IQR(hba1c, na.rm = TRUE), 2),
+    minHba1c= round(min(hba1c, na.rm = TRUE), 2),
+    maxHba1c= round(max(hba1c, na.rm = TRUE), 2),
     .groups = 'drop'
   )
 
-overallHba1c <- dataHba1c %>%
-  summarise(
-    numHba1c = "Overall",             
-    gender = "All",                   
-    count = n(),
-    NA_count = sum(is.na(hba1cNumeric)),
-    percentage = 100,                
-    meanHba1c= round(mean(hba1cNumeric, na.rm = TRUE), 2),
-    medianHba1c = round(median(hba1cNumeric, na.rm = TRUE), 2),
-    sdHba1c= round(sd(hba1cNumeric, na.rm = TRUE), 2),
-    Q1_Hba1c = round(quantile(hba1cNumeric, 0.25, na.rm = TRUE), 2),
-    Q3_Hba1c= round(quantile(hba1cNumeric, 0.75, na.rm = TRUE), 2),
-    iqrHba1c= round(IQR(hba1cNumeric, na.rm = TRUE), 2),
-  )
 
-descHba1c <- bind_rows(descHba1c, overallHba1c)
-
-# print table
+# Print table
 print(descHba1c)
 
-#prepare for plotting
-numHba1c_filtered <- descHba1c %>%
-  filter(numHba1c != "Overall") %>%
-  mutate(numHba1c = factor(numHba1c, levels = c("<42", "42-48", "≥48")))
-
-# chart: blood glucose
-ggplot(numHba1c_filtered, aes(x = numHba1c, y = percentage, fill = gender)) +
+# Plot HbA1c
+# Bar plot
+barPlot_hba1c<- ggplot(descHba1c, aes(x = hba1cCat, y = percentage, fill = gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Hba1c level by gender (%)",
-    x = "Hba1c level (mmol/L)",
+    title = "Hemoglobin A1c (HbA1c)",
+    x = "HbA1c Level (mmol/mol)",
     y = "Percentage (%)",
     fill = "Gender"
   ) +
-  theme_minimal() +
+   theme_grey() +
   theme(
-    axis.text.x = element_text(hjust = 0.5),  
-    legend.position = "right", 
-    plot.title = element_text(hjust = 0.5, margin = margin(b = 30)),
-    plot.margin = margin(b = 30, t = 20, r = 20, l = 20)
-  )
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 2, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+#Print bar plot
+print (barPlot_hba1c)
+
+#Box plot
+boxPlot_hba1c<- ggplot(msmData, aes(x = gender, y = glucose, fill = gender)) +
+  geom_boxplot(outlier.color = "red", outlier.shape = 14, alpha = 0.7) +
+  labs(
+    title = "Hemoglobin A1c (HbA1c)",
+    x = "HbA1c Level (mmol/mol)",
+    y = "HbA1c  Value",
+    fill = "Gender"
+  ) +
+  theme_grey() +
+  theme(
+    plot.title = element_text(hjust = 0.5, margin = margin(b = 10), size = 10, face ="bold"),
+    axis.title.x = element_text(size = 10, margin = margin(t = 10)),
+    axis.title.y = element_text(size = 10),
+    axis.text.x = element_text(angle = 360, hjust = 0.5, size = 8),
+    axis.text.y = element_text(size = 8),
+    legend.position = "right"
+  ) +
+  scale_fill_brewer(palette = "Set1")
+
+# Print box plot
+print(boxPlot_hba1c)
 
 ```
 
 
+```{r ALL VISUAL MD, echo=FALSE, message=FALSE, warning=FALSE, include=TRUE, fig.width=16, fig.height=14}
 
+combinedBarPlot_MD<- barPlot_bmi + barPlot_cholesterol + barPlot_glucose + barPlot_triglycerides + barPlot_hdl + barPlot_ldl + barPlot_sbp + barPlot_dbp + barPlot_hba1c +
+  plot_layout(ncol = 3) +    
+  plot_annotation(title = "Modifiable Risk Factor") 
+
+print(combinedBarPlot_MD)
+```
 
 
 
@@ -994,7 +1284,6 @@ runContinuousCox <- function(wideTransitionTable, covariates, transition) {
     }
 
     # Step 5: Fit Cox model with the expanded covariates
-    filteredData$bmi <- round(filteredData$bmi, 1)
     coxModel <- coxph(formula, data = filteredData, x = TRUE, method = "breslow")
     
     # Get summary and round coefficients and confidence intervals
@@ -1097,8 +1386,8 @@ ggplot(final_results, aes(x = Covariate, y = Hazard_Ratio, ymin = Lower_CI, ymax
   labs(title = "Overall Hazard Ratios by Transition",
        x = "Covariates",
        y = "Hazard Ratio (Log Scale)") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme_grey() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.5))
 }
 ```
 
