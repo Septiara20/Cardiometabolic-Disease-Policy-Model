@@ -525,8 +525,8 @@ regroupEthnicity <- function(wideTransitionTable) {
   # Define a mapping for the ethnicities
   ethnicityMapping <- list(
     "White" = c("White"),
-    "Black" = c("Bl_Afric", "Bl_Carib", "Bl_Other"),
-    "Asian" = c("Indian", "Pakistani", "Bangladesi", "Oth_Asian", "Chinese"),
+    "Black" = c("Bl_Afric", "Bl_Carib", "Bl_Other", "Black"),
+    "Asian" = c("Indian", "Pakistani", "Bangladesi", "Oth_Asian", "Chinese", "Asian"),
     "Mixed" = c("Mixed"),
     "Other" = c("Other", "Unknown")
   )
@@ -536,7 +536,7 @@ regroupEthnicity <- function(wideTransitionTable) {
   wideTransitionTable[, ethnicity := sapply(ethnicity, function(x) {
     # Find the group the value belongs to
     group <- names(ethnicityMapping)[sapply(ethnicityMapping, function(values) x %in% values)]
-    if (length(group) == 1) return(group) else return("other") # Default to "other" if not matched
+    if (length(group) == 1) return(group) else return("Other") # Default to "other" if not matched
   })]
   
   return(wideTransitionTable)
@@ -894,19 +894,19 @@ convertNAsToFalse <- function(data) {
 
 # Define a list to map transitions to names
 transitionNames <- list(
-  '1' = "Disease-free to Diabetes",
-  '2' = "Disease-free to MI - 1 event",
-  '3' = "Disease-free to Stroke - 1 event",
+  '1' = "Disease-free to T2DM",
+  '2' = "Disease-free to MI",
+  '3' = "Disease-free to Stroke",
   '4' = "Disease-free to Death",
-  '5' = "Diabetes to MI - 1 event",
-  '6' = "Diabetes to Stroke - 1 event",
-  '7' = "Diabetes to Death",
-  '8' = "MI - 1 event to MI - >1 event",
-  '9' = "MI - 1 event to Death",
-  '10' = "MI - >1 event to Death",
-  '11' = "Stroke - 1 event to Stroke - >1 event",
-  '12' = "Stroke - 1 event to Death",
-  '13' = "Stroke - >1 event to Death"
+  '5' = "T2DM to MI",
+  '6' = "T2DM to Stroke",
+  '7' = "T2DM to Death",
+  '8' = "MI to Post-MI",
+  '9' = "MI to Death",
+  '10' = "Post-MI to Death",
+  '11' = "Stroke to Post-Stroke",
+  '12' = "Stroke to Death",
+  '13' = "Post-stroke to Death"
 )
 
 
