@@ -4,9 +4,7 @@
 # Health Economics and Health Technology Assessment (HEHTA), 
 # University of Glasgow, UK [2024]
 ################################################################################
-# Yaldi ya bass wkwkwkwkwkwkwkwkwkwkwkkwkwkwkwkwkwkwkwkwkwkwkwkwkwkwkwkwkwkwkwkw
-################################################################################
-# Peptiara Pep Pep Tiara, Peptiara Pep Pep
+
 ################################################################################
 getPostStrokeGPData <- function() {
   postStrokeData <- data.frame(patid = character(), 
